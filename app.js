@@ -54,11 +54,11 @@ async function doSignUp(email,pass,name,role){
 }
 async function doSignIn(email,pass){
   console.log('[FORGE] Login attempt:', email);
+  initialized=false; // Reset so onAuthStateChange will load data
   const{data,error}=await sb.auth.signInWithPassword({email,password:pass});
   if(error){console.error('[FORGE] Login error:', error);toast(error.message,'err');S.loading=false;R();return;}
-  console.log('[FORGE] Login success:', data.user?.id);
 }
-async function doSignOut(){await sb.auth.signOut();S.user=null;S.profile=null;S.clients=[];R();}
+async function doSignOut(){await sb.auth.signOut();S.user=null;S.profile=null;S.clients=[];initialized=false;R();}
 
 // ===== DATA LOADERS =====
 async function loadProfile(){
@@ -122,18 +122,34 @@ function subRealtime(){
 }
 
 // ===== AUTH LISTENER =====
-let lastAuthUserId=null;
+let initialized=false;
 sb.auth.onAuthStateChange(async(ev,session)=>{
-  console.log('[FORGE] Auth state change:', ev, session?.user?.email);
-  if(ev==='SIGNED_OUT'||!session?.user){S.user=null;S.profile=null;S.loading=false;lastAuthUserId=null;R();return;}
-  // Skip if we already loaded this user
-  if(session.user.id===lastAuthUserId){console.log('[FORGE] Skipping duplicate auth event');return;}
-  lastAuthUserId=session.user.id;
-  S.user=session.user;
-  await loadAll();
-  subRealtime();
+  console.log('[FORGE] Auth event:', ev);
+  if(ev==='SIGNED_OUT'){S.user=null;S.profile=null;S.loading=false;initialized=false;R();return;}
+  if(session?.user&&!initialized){
+    initialized=true;
+    S.user=session.user;
+    S.loading=true;R();
+    try{
+      await loadProfile();
+      console.log('[FORGE] Profile:', S.profile?.role);
+      await loadClients();
+      await loadSessions();
+      await loadPrograms();
+      await loadSurveys();
+      await loadFoods();
+      console.log('[FORGE] All loaded OK');
+    }catch(e){console.error('[FORGE] Load error:', e);}
+    S.loading=false;R();
+    subRealtime();
+  }
 });
-(async()=>{const{data:{session}}=await sb.auth.getSession();if(!session){S.loading=false;R();}})();
+// Check if already logged in
+(async()=>{
+  const{data:{session}}=await sb.auth.getSession();
+  if(!session){S.loading=false;R();}
+  // if session exists, onAuthStateChange INITIAL_SESSION will handle it
+})();
 
 // ===== RENDER =====
 function R(){
