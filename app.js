@@ -39,24 +39,41 @@ play:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></sv
 
 // ===== AUTH =====
 async function doSignUp(email,pass,name,role){
-  console.log('[FORGE] Signup attempt:', email, role);
   const{data,error}=await sb.auth.signUp({email,password:pass,options:{data:{full_name:name,role}}});
-  if(error){console.error('[FORGE] Signup error:', error);toast(error.message,'err');S.loading=false;R();return;}
-  console.log('[FORGE] Signup response:', data);
-  if(data.user&&!data.session){
-    // Email confirmation required — try direct login
-    console.log('[FORGE] No session, trying direct login...');
+  if(error){toast(error.message,'err');S.loading=false;R();return;}
+  // Try to sign in directly (works if email confirm is disabled)
+  if(!data.session){
     const{data:d2,error:e2}=await sb.auth.signInWithPassword({email,password:pass});
-    if(e2){console.error('[FORGE] Auto-login failed:', e2);toast('Compte créé ! Confirmez votre email ou connectez-vous.','inf');S.loading=false;R();return;}
-    console.log('[FORGE] Auto-login success');
+    if(e2){toast('Compte créé ! Connectez-vous.','inf');S.loading=false;R();return;}
+    S.user=d2.user;
+  } else {
+    S.user=data.user;
   }
+  S.loading=true;R();
+  await loadProfile();
+  await loadClients();
+  await loadSessions();
+  await loadPrograms();
+  await loadSurveys();
+  await loadFoods();
+  subRealtime();
+  S.loading=false;R();
   toast('Bienvenue !');
 }
 async function doSignIn(email,pass){
-  console.log('[FORGE] Login attempt:', email);
-  initialized=false; // Reset so onAuthStateChange will load data
   const{data,error}=await sb.auth.signInWithPassword({email,password:pass});
-  if(error){console.error('[FORGE] Login error:', error);toast(error.message,'err');S.loading=false;R();return;}
+  if(error){toast(error.message,'err');S.loading=false;R();return;}
+  S.user=data.user;
+  S.loading=true;R();
+  await loadProfile();
+  await loadClients();
+  await loadSessions();
+  await loadPrograms();
+  await loadSurveys();
+  await loadFoods();
+  subRealtime();
+  S.loading=false;R();
+  toast('Bienvenue !');
 }
 async function doSignOut(){await sb.auth.signOut();S.user=null;S.profile=null;S.clients=[];initialized=false;R();}
 
@@ -121,35 +138,29 @@ function subRealtime(){
   sb.channel('rt-sess').on('postgres_changes',{event:'*',schema:'public',table:'sessions'},()=>{loadSessions().then(R);}).subscribe();
 }
 
-// ===== AUTH LISTENER =====
-let initialized=false;
-sb.auth.onAuthStateChange(async(ev,session)=>{
-  console.log('[FORGE] Auth event:', ev);
-  if(ev==='SIGNED_OUT'){S.user=null;S.profile=null;S.loading=false;initialized=false;R();return;}
-  if(session?.user&&!initialized){
-    initialized=true;
+// ===== AUTH - ULTRA SIMPLE =====
+async function initApp(){
+  const{data:{session}}=await sb.auth.getSession();
+  if(session?.user){
     S.user=session.user;
-    S.loading=true;R();
-    try{
-      await loadProfile();
-      console.log('[FORGE] Profile:', S.profile?.role);
-      await loadClients();
-      await loadSessions();
-      await loadPrograms();
-      await loadSurveys();
-      await loadFoods();
-      console.log('[FORGE] All loaded OK');
-    }catch(e){console.error('[FORGE] Load error:', e);}
-    S.loading=false;R();
+    await loadProfile();
+    await loadClients();
+    await loadSessions();
+    await loadPrograms();
+    await loadSurveys();
+    await loadFoods();
     subRealtime();
   }
+  S.loading=false;
+  R();
+}
+
+// Listen only for sign out (sign in is handled by doSignIn directly)
+sb.auth.onAuthStateChange((ev)=>{
+  if(ev==='SIGNED_OUT'){S.user=null;S.profile=null;S.clients=[];S.loading=false;R();}
 });
-// Check if already logged in
-(async()=>{
-  const{data:{session}}=await sb.auth.getSession();
-  if(!session){S.loading=false;R();}
-  // if session exists, onAuthStateChange INITIAL_SESSION will handle it
-})();
+
+initApp();
 
 // ===== RENDER =====
 function R(){
