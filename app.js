@@ -97,8 +97,23 @@ async function loadProfile(){
   }
 }
 async function loadClients(){
-  if(S.profile?.role==='coach'){const{data}=await sb.from('clients').select('*').eq('coach_id',S.user.id).order('created_at',{ascending:false});S.clients=data||[];}
-  else{const{data}=await sb.from('clients').select('*').eq('user_id',S.user.id);S.clients=data||[];}
+  if(S.profile?.role==='coach'){
+    const{data}=await sb.from('clients').select('*').eq('coach_id',S.user.id).order('created_at',{ascending:false});
+    S.clients=data||[];
+  } else {
+    // Auto-link: if client has no linked record, find by email and link
+    let{data}=await sb.from('clients').select('*').eq('user_id',S.user.id);
+    if(!data||data.length===0){
+      // Try to find a client record with matching email and link it
+      const{data:byEmail}=await sb.from('clients').select('*').eq('email',S.user.email).is('user_id',null);
+      if(byEmail&&byEmail.length>0){
+        await sb.from('clients').update({user_id:S.user.id}).eq('id',byEmail[0].id);
+        data=byEmail;
+        data[0].user_id=S.user.id;
+      }
+    }
+    S.clients=data||[];
+  }
 }
 async function loadSessions(){
   if(S.profile?.role==='coach'){const{data}=await sb.from('sessions').select('*').eq('coach_id',S.user.id).order('date');S.sessions=data||[];}
