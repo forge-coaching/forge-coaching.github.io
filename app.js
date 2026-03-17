@@ -122,10 +122,17 @@ function subRealtime(){
 }
 
 // ===== AUTH LISTENER =====
+let authLoading=false;
 sb.auth.onAuthStateChange(async(ev,session)=>{
   console.log('[FORGE] Auth state change:', ev, session?.user?.email);
-  if(session?.user){S.user=session.user;await loadAll();subRealtime();}
-  else{S.user=null;S.profile=null;S.loading=false;R();}
+  if(ev==='SIGNED_OUT'){S.user=null;S.profile=null;S.loading=false;R();return;}
+  if(session?.user&&!authLoading){
+    authLoading=true;
+    S.user=session.user;
+    await loadAll();
+    subRealtime();
+    authLoading=false;
+  }
 });
 (async()=>{const{data:{session}}=await sb.auth.getSession();if(!session){S.loading=false;R();}})();
 
