@@ -4,7 +4,7 @@ const SUPA_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 const sb=supabase.createClient(SUPA_URL,SUPA_KEY);
 
 // ===== STATE =====
-let S={user:null,profile:null,pg:'dashboard',clients:[],programs:[],sessions:[],surveys:[],foods:[],toasts:[],modal:null,chatTarget:null,exFilter:'Tous',loading:true};
+let S={user:null,profile:null,pg:'dashboard',clients:[],programs:[],sessions:[],surveys:[],foods:[],notifs:[],toasts:[],modal:null,chatTarget:null,exFilter:'Tous',loading:true,notifOpen:false};
 const toast=(m,t='ok')=>{const id=Date.now();S.toasts.push({id,m,t});R();setTimeout(()=>{S.toasts=S.toasts.filter(x=>x.id!==id);R()},3e3)};
 const IN=(a,b)=>((a||'X')[0]+(b||'X')[0]).toUpperCase();
 const fmtD=d=>d?new Date(d).toLocaleDateString('fr-FR'):'—';
@@ -128,6 +128,10 @@ async function loadSurveys(){
   else if(S.clients[0]){const{data}=await sb.from('surveys').select('*').eq('client_id',S.clients[0].id);S.surveys=data||[];}
 }
 async function loadFoods(){const{data}=await sb.from('foods').select('*').order('name');S.foods=data||[];}
+async function loadNotifs(){
+  const{data}=await sb.from('notifications').select('*').eq('user_id',S.user.id).order('created_at',{ascending:false});
+  S.notifs=data||[];
+}
 async function loadMsgs(cid){const{data}=await sb.from('messages').select('*').eq('client_id',cid).order('created_at');return data||[];}
 async function loadPerfs(cid){const{data}=await sb.from('performances').select('*').eq('client_id',cid).order('date');return data||[];}
 async function loadAll(){
@@ -142,6 +146,7 @@ async function loadAll(){
     await loadPrograms();
     await loadSurveys();
     await loadFoods();
+    await loadNotifs();
     console.log('[FORGE] All data loaded');
   }catch(e){console.error('[FORGE] loadAll error:', e);}
   S.loading=false;R();
@@ -151,6 +156,7 @@ async function loadAll(){
 function subRealtime(){
   sb.channel('rt-msgs').on('postgres_changes',{event:'INSERT',schema:'public',table:'messages'},()=>{if(S.pg==='chat'||S.pg==='cl-chat'){const el=document.getElementById('chatMsgs');if(el)refreshChat();}}).subscribe();
   sb.channel('rt-sess').on('postgres_changes',{event:'*',schema:'public',table:'sessions'},()=>{loadSessions().then(R);}).subscribe();
+  sb.channel('rt-notifs').on('postgres_changes',{event:'INSERT',schema:'public',table:'notifications',filter:`user_id=eq.${S.user.id}`},()=>{loadNotifs().then(R);}).subscribe();
 }
 
 // ===== AUTH - ULTRA SIMPLE =====
@@ -236,7 +242,30 @@ return `<div class="side"><div class="side-hd"><div class="logo">Forge</div><div
 }
 function topBar(){
 const ts={dashboard:'Tableau de bord',clients:'Clients',exercises:'Bibliothèque',programs:'Programmes',timer:'Timer WOD',performance:'Performances',calories:'Calories',nutrition:'Nutrition',calendar:'Calendrier',chat:'Messages',survey:'Satisfaction',qrcode:'QR Codes',stats:'Stats',settings:'Paramètres','cl-dash':'Mon espace','cl-cal':'Mes séances','cl-prog':'Programme','cl-kcal':'Objectifs','cl-nutri':'Nutrition','cl-chat':'Messages','cl-survey':'Évaluations'};
-return `<div class="topbar"><span style="font-size:.8rem;font-weight:500">${ts[S.pg]||'Forge'}</span><button class="bic">${ic.bell}</button></div>`;
+const unread=S.notifs.filter(n=>!n.read).length;
+return `<div class="topbar"><span style="font-size:.8rem;font-weight:500">${ts[S.pg]||'Forge'}</span>
+<div style="position:relative"><button class="bic" onclick="S.notifOpen=!S.notifOpen;R()">${ic.bell}${unread?`<span style="position:absolute;top:3px;right:3px;width:8px;height:8px;background:var(--red);border-radius:50%;border:2px solid var(--bg)"></span>`:''}</button>
+${S.notifOpen?`<div style="position:absolute;right:0;top:42px;width:320px;background:var(--bg2);border:1px solid rgba(255,255,255,.06);border-radius:var(--r);box-shadow:0 10px 40px rgba(0,0,0,.4);z-index:200;overflow:hidden">
+<div style="padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.04);display:flex;justify-content:space-between;align-items:center"><strong style="font-size:.82rem">Notifications</strong>${unread?`<button class="b bg bsm" onclick="markAllRead()">Tout lu</button>`:''}</div>
+<div style="max-height:350px;overflow-y:auto">${S.notifs.length?S.notifs.slice(0,10).map(n=>`<div style="padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.03);cursor:pointer;${n.read?'opacity:.5':''}" onclick="handleNotif(${n.id},'${n.type||''}')">
+<div style="display:flex;justify-content:space-between;align-items:center"><div style="font-size:.78rem;font-weight:${n.read?'400':'700'}">${n.title||''}</div>${!n.read?'<div style="width:6px;height:6px;background:var(--ac);border-radius:50%;flex-shrink:0"></div>':''}</div>
+<div style="font-size:.7rem;color:var(--t3);margin-top:2px">${n.body||''}</div>
+<div style="font-size:.58rem;color:var(--t4);margin-top:3px">${n.created_at?fmtT(n.created_at):''}</div>
+</div>`).join(''):'<div style="padding:24px;text-align:center;color:var(--t4);font-size:.8rem">Aucune notification</div>'}</div>
+</div>`:''}</div></div>`;
+}
+async function markAllRead(){
+  const ids=S.notifs.filter(n=>!n.read).map(n=>n.id);
+  if(ids.length)await sb.from('notifications').update({read:true}).in('id',ids);
+  S.notifs.forEach(n=>n.read=true);S.notifOpen=false;R();
+}
+async function handleNotif(id,type){
+  await sb.from('notifications').update({read:true}).eq('id',id);
+  const n=S.notifs.find(x=>x.id===id);if(n)n.read=true;
+  S.notifOpen=false;
+  if(type==='survey'){S.pg=S.profile?.role==='coach'?'survey':'cl-survey';}
+  else if(type==='session'){S.pg=S.profile?.role==='coach'?'calendar':'cl-cal';}
+  R();
 }
 
 // ===== PAGE ROUTER =====
@@ -259,7 +288,28 @@ return `<div style="display:flex;justify-content:space-between;align-items:cente
 <div class="g2"><div class="card"><div class="card-h"><h3>Séances du jour</h3><span class="badge ba">${today.slice(5)}</span></div><div class="card-b">${tse.length?tse.map(s=>{const c=cl.find(x=>x.id===s.client_id);return `<div class="sess up"><div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center;gap:7px"><div class="av av-s" style="background:${c?.color||'var(--t4)'};color:#000">${c?IN(c.first_name,c.last_name):'?'}</div><strong style="font-size:.82rem">${c?c.first_name+' '+c.last_name:'—'}</strong></div><span style="font-family:var(--fm);font-size:.72rem;color:var(--ac)">${s.time||''}</span></div><div style="margin-top:5px"><span class="badge bo">${s.type||''}</span>${s.status==='upcoming'?` <button class="b bg bsm" onclick="complSess(${s.id})">Valider ✓</button>`:' <span class="badge bgr">Fait</span>'}</div></div>`;}).join(''):'<div style="text-align:center;padding:16px;color:var(--t4)">Aucune séance aujourd\'hui</div>'}</div></div>
 <div class="card"><div class="card-h"><h3>Clients</h3><button class="b bs bsm" onclick="S.pg='clients';R()">Tous</button></div><div class="card-b">${cl.slice(0,5).map(c=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.03);cursor:pointer" onclick="openClient(${c.id})"><div class="av av-s" style="background:${c.color||'var(--ac)'};color:#000">${IN(c.first_name,c.last_name)}</div><div style="flex:1"><div style="font-size:.78rem;font-weight:600">${c.first_name} ${c.last_name}</div><div style="font-size:.65rem;color:var(--t4)">${c.goal||''}</div></div><span class="badge ${c.active?'bgr':'bo'}" style="font-size:.5rem">${c.active?'Actif':'—'}</span></div>`).join('')}${!cl.length?'<div style="text-align:center;padding:14px;color:var(--t4)"><a onclick="openAddClient()">+ Ajouter un client</a></div>':''}</div></div></div>`;
 }
-async function complSess(id){await sb.from('sessions').update({status:'done'}).eq('id',id);await loadSessions();toast('Séance validée !');R();}
+async function complSess(id){
+  const sess=S.sessions.find(s=>s.id===id);
+  await sb.from('sessions').update({status:'done'}).eq('id',id);
+  // Find client and send notification
+  if(sess){
+    const c=S.clients.find(x=>x.id===sess.client_id);
+    if(c&&c.user_id){
+      await sb.from('notifications').insert({user_id:c.user_id,client_id:c.id,type:'survey',title:'Séance terminée !',body:`${sess.type||'Séance'} du ${sess.date} — Donnez votre avis`});
+    }
+    // Auto-open survey creation for coach
+    S.modal={title:'Questionnaire post-séance',w:true,content:`
+    <div style="background:var(--acg);border:1px solid rgba(200,255,0,.08);border-radius:var(--r2);padding:12px;margin-bottom:14px;font-size:.82rem;color:var(--ac)">📋 Séance "${sess.type||''}" validée pour ${c?c.first_name+' '+c.last_name:''}. Remplir le questionnaire ?</div>
+    <div class="g3"><div class="fg"><label class="lb">Note globale (1-5)</label><input id="svG" type="number" min="1" max="5" value="5"></div><div class="fg"><label class="lb">Note coach (1-5)</label><input id="svC" type="number" min="1" max="5" value="5"></div><div class="fg"><label class="lb">Note programme (1-5)</label><input id="svP" type="number" min="1" max="5" value="4"></div></div>
+    <div class="g2"><div class="fg"><label class="lb">Effort (1-10)</label><input id="svE" type="number" min="1" max="10" value="7"></div><div class="fg"><label class="lb">Objectifs</label><select id="svGoal"><option>En cours</option><option>Atteints</option><option>Non atteints</option></select></div></div>
+    <div class="fg"><label class="lb">Commentaires</label><textarea id="svCom"></textarea></div>
+    `,onSave:async()=>{
+      await sb.from('surveys').insert({coach_id:S.user.id,client_id:sess.client_id,global_rating:+document.getElementById('svG')?.value,coach_rating:+document.getElementById('svC')?.value,program_rating:+document.getElementById('svP')?.value,effort:+document.getElementById('svE')?.value,comments:document.getElementById('svCom')?.value,goals:document.getElementById('svGoal')?.value});
+      S.modal=null;await loadSurveys();toast('Questionnaire enregistré !');R();
+    },ns:false};
+  }
+  await loadSessions();toast('Séance validée !');R();
+}
 
 // ===== COACH: CLIENTS =====
 function cClients(){
@@ -352,7 +402,20 @@ return `<div style="display:flex;justify-content:space-between;align-items:cente
 function openAddSess(){
 const cl=S.clients.filter(c=>c.active);
 S.modal={title:'Nouvelle séance',content:`<div class="fg"><label class="lb">Client</label><select id="sC">${cl.map(c=>`<option value="${c.id}">${c.first_name} ${c.last_name}</option>`).join('')}</select></div><div class="g2"><div class="fg"><label class="lb">Date</label><input id="sD" type="date" value="${new Date().toISOString().split('T')[0]}"></div><div class="fg"><label class="lb">Heure</label><input id="sT" value="09:00"></div></div><div class="fg"><label class="lb">Type</label><input id="sType" placeholder="Push, HIIT..."></div>`,
-onSave:async()=>{const{error}=await sb.from('sessions').insert({coach_id:S.user.id,client_id:+document.getElementById('sC')?.value,date:document.getElementById('sD')?.value,time:document.getElementById('sT')?.value,type:document.getElementById('sType')?.value||'Séance'});if(error){toast(error.message,'err');return;}S.modal=null;await loadSessions();toast('Séance ajoutée !');R();}};R();
+onSave:async()=>{
+  const cid=+document.getElementById('sC')?.value;
+  const date=document.getElementById('sD')?.value;
+  const time=document.getElementById('sT')?.value;
+  const type=document.getElementById('sType')?.value||'Séance';
+  const{error}=await sb.from('sessions').insert({coach_id:S.user.id,client_id:cid,date,time,type});
+  if(error){toast(error.message,'err');return;}
+  // Notify client
+  const c=S.clients.find(x=>x.id===cid);
+  if(c&&c.user_id){
+    await sb.from('notifications').insert({user_id:c.user_id,client_id:c.id,type:'session',title:'Nouvelle séance planifiée',body:`${type} le ${date} à ${time}`});
+  }
+  S.modal=null;await loadSessions();toast('Séance ajoutée !');R();
+}};R();
 }
 
 // ===== COACH: PROGRAMS (FULL CRUD) =====
