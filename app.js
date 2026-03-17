@@ -159,14 +159,10 @@ return `<div style="min-height:100vh;display:flex;position:relative;overflow:hid
 <div style="flex:1;padding:7px;text-align:center;border-radius:7px;font-size:.74rem;font-weight:600;cursor:pointer;${authMode==='register'?'background:var(--s2);color:var(--t)':'color:var(--t3)'}" onclick="authMode='register';R()">Inscription</div>
 </div>
 ${authMode==='register'?`
-<div style="display:flex;gap:6px;margin-bottom:16px">
-<div style="flex:1;padding:10px;border-radius:var(--r2);border:1px solid ${authRole==='coach'?'var(--ac)':'var(--bg5)'};text-align:center;cursor:pointer;background:${authRole==='coach'?'var(--acg)':'var(--bg3)'}" onclick="authRole='coach';R()"><div style="font-size:1.2rem">🏋️</div><div style="font-size:.72rem;font-weight:700;margin-top:3px">Coach</div></div>
-<div style="flex:1;padding:10px;border-radius:var(--r2);border:1px solid ${authRole==='client'?'var(--ac)':'var(--bg5)'};text-align:center;cursor:pointer;background:${authRole==='client'?'var(--acg)':'var(--bg3)'}" onclick="authRole='client';R()"><div style="font-size:1.2rem">💪</div><div style="font-size:.72rem;font-weight:700;margin-top:3px">Client</div></div>
-</div>
 <div class="fg"><label class="lb">Nom complet</label><input id="rN" placeholder="Jean Dupont"></div>
 <div class="fg"><label class="lb">Email</label><input id="rE" type="email"></div>
 <div class="fg"><label class="lb">Mot de passe (min 6)</label><input id="rP" type="password"></div>
-<button class="b bp" style="width:100%" onclick="handleReg()">Créer mon compte</button>
+<button class="b bp" style="width:100%" onclick="handleReg()">Créer mon compte client</button>
 <p style="text-align:center;margin-top:12px;font-size:.76rem;color:var(--t3)">Déjà un compte ? <a onclick="authMode='login';R()">Se connecter</a></p>
 `:`
 <div class="fg"><label class="lb">Email</label><input id="lE" type="email"></div>
@@ -177,7 +173,7 @@ ${authMode==='register'?`
 </div></div></div>`;
 }
 async function handleLogin(){const e=document.getElementById('lE')?.value,p=document.getElementById('lP')?.value;if(!e||!p){toast('Champs requis','err');return;}S.loading=true;R();await doSignIn(e,p);}
-async function handleReg(){const n=document.getElementById('rN')?.value,e=document.getElementById('rE')?.value,p=document.getElementById('rP')?.value;if(!n||!e||!p){toast('Tous les champs requis','err');return;}if(p.length<6){toast('Mot de passe trop court','err');return;}await doSignUp(e,p,n,authRole);}
+async function handleReg(){const n=document.getElementById('rN')?.value,e=document.getElementById('rE')?.value,p=document.getElementById('rP')?.value;if(!n||!e||!p){toast('Tous les champs requis','err');return;}if(p.length<6){toast('Mot de passe trop court','err');return;}await doSignUp(e,p,n,'client');}
 
 // ===== SIDEBAR =====
 function sideBar(isC){
