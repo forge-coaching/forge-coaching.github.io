@@ -4,7 +4,7 @@ const SUPA_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 const sb=supabase.createClient(SUPA_URL,SUPA_KEY);
 
 // ===== STATE =====
-let S={user:null,profile:null,pg:'dashboard',clients:[],programs:[],sessions:[],surveys:[],foods:[],notifs:[],toasts:[],modal:null,chatTarget:null,exFilter:'Tous',loading:true,notifOpen:false};
+let S={user:null,profile:null,pg:'dashboard',clients:[],programs:[],sessions:[],surveys:[],foods:[],notifs:[],toasts:[],modal:null,chatTarget:null,exFilter:'Tous',loading:true,notifOpen:false,sideOpen:false};
 const toast=(m,t='ok')=>{const id=Date.now();S.toasts.push({id,m,t});R();setTimeout(()=>{S.toasts=S.toasts.filter(x=>x.id!==id);R()},3e3)};
 const IN=(a,b)=>((a||'X')[0]+(b||'X')[0]).toUpperCase();
 const fmtD=d=>d?new Date(d).toLocaleDateString('fr-FR'):'—';
@@ -197,35 +197,52 @@ function R(){
 // ===== AUTH PAGE =====
 let authMode='login',authRole='coach';
 function authPg(){
-return `<div style="min-height:100vh;display:flex;position:relative;overflow:hidden">
-<div style="position:absolute;width:700px;height:700px;background:radial-gradient(circle,var(--acg) 0%,transparent 65%);top:-250px;left:-150px;pointer-events:none"></div>
-<div style="flex:1;display:flex;align-items:center;justify-content:center;padding:50px;position:relative;z-index:1">
-<div style="max-width:400px"><h1 style="font-family:var(--fs);font-size:4.5rem;color:var(--ac);font-style:italic;letter-spacing:-3px;line-height:.9">Forge</h1>
-<p style="font-size:.95rem;color:var(--t2);margin-top:16px;line-height:1.7;font-weight:300">Plateforme de coaching connectée. Données cloud, chat temps réel, suivi complet.</p>
-<div style="margin-top:32px;display:flex;flex-direction:column;gap:8px">${['☁️ Données sauvegardées en cloud','💬 Chat temps réel coach ↔ client','⏱️ Timer AMRAP / EMOM / Tabata','📚 40+ exercices avec anatomie','📱 QR code par client'].map(f=>`<div style="display:flex;align-items:center;gap:10px;font-size:.82rem;color:var(--t2)"><span style="font-size:.9rem">${f.slice(0,2)}</span>${f.slice(3)}</div>`).join('')}</div>
+return `<div style="min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;position:relative;overflow:hidden">
+<!-- BG effects -->
+<div style="position:fixed;width:600px;height:600px;background:radial-gradient(circle,rgba(200,255,0,.04) 0%,transparent 70%);top:-200px;left:-100px;pointer-events:none"></div>
+<div style="position:fixed;width:400px;height:400px;background:radial-gradient(circle,rgba(200,255,0,.03) 0%,transparent 70%);bottom:-100px;right:-100px;pointer-events:none"></div>
+<!-- Nav -->
+<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 24px;position:relative;z-index:2">
+<div style="font-family:var(--fs);font-size:1.5rem;color:var(--ac);font-style:italic">Forge</div>
+<div style="display:flex;gap:6px">
+<button class="b bs bsm" onclick="authMode='login';R()">Connexion</button>
+<button class="b bp bsm" onclick="authMode='register';R()">S'inscrire</button>
 </div></div>
-<div style="width:420px;background:var(--bg2);display:flex;align-items:center;justify-content:center;padding:40px;border-left:1px solid rgba(255,255,255,.04);position:relative;z-index:1">
-<div style="width:100%;max-width:320px">
-<h2 style="font-family:var(--fs);font-size:2rem;font-style:italic;margin-bottom:4px">${authMode==='login'?'Connexion':'Inscription'}</h2>
-<p style="color:var(--t3);font-size:.8rem;margin-bottom:18px">${authMode==='login'?'Accédez à votre espace':'Créez votre compte'}</p>
-<div style="display:flex;gap:4px;background:var(--bg3);padding:3px;border-radius:var(--r2);margin-bottom:18px">
-<div style="flex:1;padding:7px;text-align:center;border-radius:7px;font-size:.74rem;font-weight:600;cursor:pointer;${authMode==='login'?'background:var(--s2);color:var(--t)':'color:var(--t3)'}" onclick="authMode='login';R()">Connexion</div>
-<div style="flex:1;padding:7px;text-align:center;border-radius:7px;font-size:.74rem;font-weight:600;cursor:pointer;${authMode==='register'?'background:var(--s2);color:var(--t)':'color:var(--t3)'}" onclick="authMode='register';R()">Inscription</div>
+<!-- Hero -->
+<div style="flex:1;display:flex;align-items:center;justify-content:center;padding:20px;position:relative;z-index:1">
+<div style="display:grid;grid-template-columns:1fr 400px;gap:60px;max-width:900px;width:100%;align-items:center" id="authGrid">
+<!-- Left: Hero content -->
+<div>
+<div style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border:1px solid rgba(200,255,0,.12);border-radius:99px;margin-bottom:16px;font-size:.65rem;font-weight:600;color:var(--ac);letter-spacing:.5px">⚡ PLATEFORME COACHING</div>
+<h1 style="font-family:var(--fs);font-size:3.5rem;color:var(--t);font-style:italic;letter-spacing:-2px;line-height:.95">Gérez vos<br>clients comme<br>un <span style="color:var(--ac)">pro</span></h1>
+<p style="font-size:.9rem;color:var(--t2);margin-top:16px;line-height:1.7;max-width:380px">Séances, programmes, chat, nutrition, performances — tout centralisé dans un outil connecté en temps réel.</p>
+<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:24px">
+${['Chat temps réel','Timer WOD','40+ exercices','Suivi nutrition','Notifications'].map(f=>`<div style="padding:6px 14px;border-radius:99px;border:1px solid var(--bg5);font-size:.7rem;color:var(--t3);font-weight:500">${f}</div>`).join('')}
 </div>
+</div>
+<!-- Right: Auth form -->
+<div style="background:var(--bg2);border:1px solid rgba(255,255,255,.05);border-radius:16px;padding:28px">
+<h2 style="font-family:var(--fs);font-size:1.6rem;font-style:italic;margin-bottom:3px">${authMode==='login'?'Connexion':'Créer un compte'}</h2>
+<p style="color:var(--t4);font-size:.76rem;margin-bottom:18px">${authMode==='login'?'Accédez à votre espace':'Inscription gratuite'}</p>
 ${authMode==='register'?`
 <div class="fg"><label class="lb">Nom complet</label><input id="rN" placeholder="Jean Dupont"></div>
-<div class="fg"><label class="lb">Email</label><input id="rE" type="email"></div>
-<div class="fg"><label class="lb">Mot de passe (min 6)</label><input id="rP" type="password"></div>
-<button class="b bp" style="width:100%" onclick="handleReg()">Créer mon compte client</button>
-<p style="text-align:center;margin-top:12px;font-size:.76rem;color:var(--t3)">Déjà un compte ? <a onclick="authMode='login';R()">Se connecter</a></p>
+<div class="fg"><label class="lb">Email</label><input id="rE" type="email" placeholder="email@exemple.com"></div>
+<div class="fg"><label class="lb">Mot de passe (min 6)</label><input id="rP" type="password" placeholder="••••••••"></div>
+<button class="b bp" style="width:100%" onclick="handleReg()">Créer mon compte</button>
+<p style="text-align:center;margin-top:14px;font-size:.74rem;color:var(--t4)">Déjà un compte ? <a onclick="authMode='login';R()">Se connecter</a></p>
 `:`
-<div class="fg"><label class="lb">Email</label><input id="lE" type="email"></div>
-<div class="fg"><label class="lb">Mot de passe</label><input id="lP" type="password"></div>
+<div class="fg"><label class="lb">Email</label><input id="lE" type="email" placeholder="email@exemple.com"></div>
+<div class="fg"><label class="lb">Mot de passe</label><input id="lP" type="password" placeholder="••••••••"></div>
 <button class="b bp" style="width:100%" onclick="handleLogin()">Se connecter</button>
-<p style="text-align:center;margin-top:12px;font-size:.76rem;color:var(--t3)">Pas de compte ? <a onclick="authMode='register';R()">S'inscrire</a></p>
+<p style="text-align:center;margin-top:14px;font-size:.74rem;color:var(--t4)">Pas de compte ? <a onclick="authMode='register';R()">S'inscrire</a></p>
 `}
-</div></div></div>`;
-}
+</div>
+</div></div>
+<!-- Footer -->
+<div style="padding:12px 24px;text-align:center;font-size:.6rem;color:var(--t4);position:relative;z-index:1">FORGE — Coaching Platform · Propulsé par Supabase</div>
+<style>#authGrid{grid-template-columns:1fr 400px}@media(max-width:850px){#authGrid{grid-template-columns:1fr!important;gap:30px!important;text-align:center}#authGrid h1{font-size:2.5rem!important}#authGrid p{max-width:100%!important}#authGrid>div:first-child div:last-child{justify-content:center}}</style>
+</div>`;}
+
 async function handleLogin(){const e=document.getElementById('lE')?.value,p=document.getElementById('lP')?.value;if(!e||!p){toast('Champs requis','err');return;}S.loading=true;R();await doSignIn(e,p);}
 async function handleReg(){const n=document.getElementById('rN')?.value,e=document.getElementById('rE')?.value,p=document.getElementById('rP')?.value;if(!n||!e||!p){toast('Tous les champs requis','err');return;}if(p.length<6){toast('Mot de passe trop court','err');return;}await doSignUp(e,p,n,'client');}
 
@@ -235,15 +252,16 @@ const p=S.pg,name=S.profile?.full_name||S.user?.email||'User';
 const cn=[{id:'dashboard',l:'Tableau de bord',i:ic.dash},{id:'clients',l:'Clients',i:ic.users},{id:'exercises',l:'Bibliothèque',i:ic.lib},{id:'programs',l:'Programmes',i:ic.prog},{id:'timer',l:'Timer WOD',i:ic.timer},{id:'performance',l:'Performances',i:ic.perf},{id:'calories',l:'Calories',i:ic.fire},{id:'nutrition',l:'Nutrition',i:ic.food},{id:'calendar',l:'Calendrier',i:ic.cal},{id:'chat',l:'Messages',i:ic.chat},{id:'survey',l:'Satisfaction',i:ic.star},{id:'qrcode',l:'QR Codes',i:ic.qr},{id:'stats',l:'Stats',i:ic.chart}];
 const cln=[{id:'cl-dash',l:'Mon espace',i:ic.dash},{id:'cl-cal',l:'Mes séances',i:ic.cal},{id:'cl-prog',l:'Programme',i:ic.prog},{id:'exercises',l:'Exercices',i:ic.lib},{id:'timer',l:'Timer WOD',i:ic.timer},{id:'cl-kcal',l:'Objectifs',i:ic.fire},{id:'cl-nutri',l:'Nutrition',i:ic.food},{id:'cl-chat',l:'Messages',i:ic.chat},{id:'cl-survey',l:'Évaluations',i:ic.star}];
 const nav=isC?cn:cln;
-return `<div class="side"><div class="side-hd"><div class="logo">Forge</div><div class="logo-s">${isC?'Coach Platform':'Espace Client'}</div></div>
-<nav class="side-nav"><div class="nsec">Menu</div>${nav.map(n=>`<div class="ni ${p===n.id?'on':''}" onclick="S.pg='${n.id}';R()">${n.i}${n.l}</div>`).join('')}
-<div class="nsec" style="margin-top:10px">Compte</div><div class="ni" onclick="S.pg='settings';R()">${ic.gear}Paramètres</div><div class="ni" onclick="doSignOut()">${ic.out}Déconnexion</div>
-</nav><div class="side-ft"><div class="ucard"><div class="av av-s" style="background:${isC?'var(--ac)':'var(--blu)'};color:#000">${name.split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2)}</div><div style="flex:1;min-width:0"><div style="font-size:.75rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</div><div style="font-size:.6rem;color:var(--t4)">${isC?'Coach':'Client'}</div></div></div></div></div>`;
+return `<div class="side-overlay ${S.sideOpen?'open':''}" onclick="S.sideOpen=false;R()"></div>
+<div class="side ${S.sideOpen?'open':''}"><div class="side-hd"><div class="logo">Forge</div><div class="logo-s">${isC?'Coach Platform':'Espace Client'}</div></div>
+<nav class="side-nav"><div class="nsec">Menu</div>${nav.map(n=>`<div class="ni ${p===n.id?'on':''}" onclick="S.pg='${n.id}';S.sideOpen=false;R()">${n.i}${n.l}</div>`).join('')}
+<div class="nsec" style="margin-top:8px">Compte</div><div class="ni" onclick="S.pg='settings';S.sideOpen=false;R()">${ic.gear}Paramètres</div><div class="ni" onclick="doSignOut()">${ic.out}Déconnexion</div>
+</nav><div class="side-ft"><div class="ucard"><div class="av av-s" style="background:${isC?'var(--ac)':'var(--blu)'};color:#000">${name.split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2)}</div><div style="flex:1;min-width:0"><div style="font-size:.72rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</div><div style="font-size:.55rem;color:var(--t4)">${isC?'Coach':'Client'}</div></div></div></div></div>`;
 }
 function topBar(){
 const ts={dashboard:'Tableau de bord',clients:'Clients',exercises:'Bibliothèque',programs:'Programmes',timer:'Timer WOD',performance:'Performances',calories:'Calories',nutrition:'Nutrition',calendar:'Calendrier',chat:'Messages',survey:'Satisfaction',qrcode:'QR Codes',stats:'Stats',settings:'Paramètres','cl-dash':'Mon espace','cl-cal':'Mes séances','cl-prog':'Programme','cl-kcal':'Objectifs','cl-nutri':'Nutrition','cl-chat':'Messages','cl-survey':'Évaluations'};
 const unread=S.notifs.filter(n=>!n.read).length;
-return `<div class="topbar"><span style="font-size:.8rem;font-weight:500">${ts[S.pg]||'Forge'}</span>
+return `<div class="topbar"><div style="display:flex;align-items:center;gap:8px"><button class="mob-toggle" onclick="S.sideOpen=!S.sideOpen;R()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg></button><span style="font-size:.8rem;font-weight:500">${ts[S.pg]||'Forge'}</span></div>
 <div style="position:relative"><button class="bic" onclick="S.notifOpen=!S.notifOpen;R()">${ic.bell}${unread?`<span style="position:absolute;top:3px;right:3px;width:8px;height:8px;background:var(--red);border-radius:50%;border:2px solid var(--bg)"></span>`:''}</button>
 ${S.notifOpen?`<div style="position:absolute;right:0;top:42px;width:320px;background:var(--bg2);border:1px solid rgba(255,255,255,.06);border-radius:var(--r);box-shadow:0 10px 40px rgba(0,0,0,.4);z-index:200;overflow:hidden">
 <div style="padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.04);display:flex;justify-content:space-between;align-items:center"><strong style="font-size:.82rem">Notifications</strong>${unread?`<button class="b bg bsm" onclick="markAllRead()">Tout lu</button>`:''}</div>
