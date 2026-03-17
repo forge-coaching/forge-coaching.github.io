@@ -41,7 +41,12 @@ play:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></sv
 async function doSignUp(email,pass,name,role){
   const{data,error}=await sb.auth.signUp({email,password:pass,options:{data:{full_name:name,role}}});
   if(error){toast(error.message,'err');return false;}
-  toast('Compte créé ! Vérifiez votre email pour confirmer.','inf');return true;
+  // If email confirmation is disabled, user is auto-logged in
+  if(data.session){toast('Compte créé ! Bienvenue !');return true;}
+  // If email confirmation is required, try to sign in directly
+  const{data:loginData,error:loginErr}=await sb.auth.signInWithPassword({email,password:pass});
+  if(loginErr){toast('Compte créé ! Connectez-vous.','inf');return true;}
+  toast('Compte créé ! Bienvenue !');return true;
 }
 async function doSignIn(email,pass){
   const{data,error}=await sb.auth.signInWithPassword({email,password:pass});
@@ -51,7 +56,16 @@ async function doSignIn(email,pass){
 async function doSignOut(){await sb.auth.signOut();S.user=null;S.profile=null;S.clients=[];R();}
 
 // ===== DATA LOADERS =====
-async function loadProfile(){const{data}=await sb.from('profiles').select('*').eq('id',S.user.id).single();S.profile=data;}
+async function loadProfile(){
+  const{data,error}=await sb.from('profiles').select('*').eq('id',S.user.id).single();
+  if(data){S.profile=data;return;}
+  // Profile missing — create it from auth user metadata
+  const meta=S.user.user_metadata||{};
+  const newProfile={id:S.user.id,email:S.user.email,full_name:meta.full_name||S.user.email.split('@')[0],role:meta.role||'client'};
+  const{data:created,error:insertErr}=await sb.from('profiles').insert(newProfile).select().single();
+  if(insertErr){console.error('Profile creation failed:',insertErr);S.profile=newProfile;}
+  else{S.profile=created;}
+}
 async function loadClients(){
   if(S.profile?.role==='coach'){const{data}=await sb.from('clients').select('*').eq('coach_id',S.user.id).order('created_at',{ascending:false});S.clients=data||[];}
   else{const{data}=await sb.from('clients').select('*').eq('user_id',S.user.id);S.clients=data||[];}
