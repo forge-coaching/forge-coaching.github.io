@@ -122,17 +122,16 @@ function subRealtime(){
 }
 
 // ===== AUTH LISTENER =====
-let authLoading=false;
+let lastAuthUserId=null;
 sb.auth.onAuthStateChange(async(ev,session)=>{
   console.log('[FORGE] Auth state change:', ev, session?.user?.email);
-  if(ev==='SIGNED_OUT'){S.user=null;S.profile=null;S.loading=false;R();return;}
-  if(session?.user&&!authLoading){
-    authLoading=true;
-    S.user=session.user;
-    await loadAll();
-    subRealtime();
-    authLoading=false;
-  }
+  if(ev==='SIGNED_OUT'||!session?.user){S.user=null;S.profile=null;S.loading=false;lastAuthUserId=null;R();return;}
+  // Skip if we already loaded this user
+  if(session.user.id===lastAuthUserId){console.log('[FORGE] Skipping duplicate auth event');return;}
+  lastAuthUserId=session.user.id;
+  S.user=session.user;
+  await loadAll();
+  subRealtime();
 });
 (async()=>{const{data:{session}}=await sb.auth.getSession();if(!session){S.loading=false;R();}})();
 
