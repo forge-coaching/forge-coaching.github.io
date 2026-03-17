@@ -197,50 +197,52 @@ function R(){
 // ===== AUTH PAGE =====
 let authMode='login',authRole='coach';
 function authPg(){
-return `<div style="min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;position:relative;overflow:hidden">
-<!-- BG effects -->
-<div style="position:fixed;width:600px;height:600px;background:radial-gradient(circle,rgba(200,255,0,.04) 0%,transparent 70%);top:-200px;left:-100px;pointer-events:none"></div>
-<div style="position:fixed;width:400px;height:400px;background:radial-gradient(circle,rgba(200,255,0,.03) 0%,transparent 70%);bottom:-100px;right:-100px;pointer-events:none"></div>
+return `<div style="min-height:100dvh;display:flex;flex-direction:column;position:relative;overflow:hidden;background:var(--bg)">
+<!-- Ambient glow -->
+<div style="position:fixed;width:800px;height:800px;background:radial-gradient(circle,rgba(200,255,0,.025) 0%,transparent 65%);top:-300px;left:-200px;pointer-events:none"></div>
+<div style="position:fixed;width:500px;height:500px;background:radial-gradient(circle,rgba(200,255,0,.015) 0%,transparent 65%);bottom:-150px;right:-150px;pointer-events:none"></div>
+<div style="position:fixed;top:50%;left:50%;width:1px;height:60vh;background:linear-gradient(to bottom,transparent,rgba(200,255,0,.03),transparent);transform:translate(-50%,-50%);pointer-events:none"></div>
 <!-- Nav -->
-<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 24px;position:relative;z-index:2">
-<div style="font-family:var(--fs);font-size:1.5rem;color:var(--ac);font-style:italic">Forge</div>
-<div style="display:flex;gap:6px">
-<button class="b bs bsm" onclick="authMode='login';R()">Connexion</button>
-<button class="b bp bsm" onclick="authMode='register';R()">S'inscrire</button>
+<div style="display:flex;align-items:center;justify-content:space-between;padding:20px 32px;position:relative;z-index:2">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:var(--fs);font-size:1.6rem;color:var(--ac);font-weight:700">Forge</span><span style="font-size:.5rem;color:var(--t4);letter-spacing:3px;text-transform:uppercase;font-weight:500">coaching</span></div>
+<div style="display:flex;gap:8px">
+<button class="b bs bsm" onclick="authMode='login';R()" style="border-color:rgba(255,255,255,.06)">Connexion</button>
+<button class="b bp bsm" onclick="authMode='register';R()">Commencer</button>
 </div></div>
 <!-- Hero -->
-<div style="flex:1;display:flex;align-items:center;justify-content:center;padding:20px;position:relative;z-index:1">
-<div style="display:grid;grid-template-columns:1fr 400px;gap:60px;max-width:900px;width:100%;align-items:center" id="authGrid">
-<!-- Left: Hero content -->
+<div style="flex:1;display:flex;align-items:center;justify-content:center;padding:24px;position:relative;z-index:1">
+<div style="display:grid;grid-template-columns:1fr 380px;gap:70px;max-width:880px;width:100%;align-items:center" id="authGrid">
 <div>
-<div style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border:1px solid rgba(200,255,0,.12);border-radius:99px;margin-bottom:16px;font-size:.65rem;font-weight:600;color:var(--ac);letter-spacing:.5px">⚡ PLATEFORME COACHING</div>
-<h1 style="font-family:var(--fs);font-size:3.5rem;color:var(--t);font-style:italic;letter-spacing:-2px;line-height:.95">Gérez vos<br>clients comme<br>un <span style="color:var(--ac)">pro</span></h1>
-<p style="font-size:.9rem;color:var(--t2);margin-top:16px;line-height:1.7;max-width:380px">Séances, programmes, chat, nutrition, performances — tout centralisé dans un outil connecté en temps réel.</p>
-<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:24px">
-${['Chat temps réel','Timer WOD','40+ exercices','Suivi nutrition','Notifications'].map(f=>`<div style="padding:6px 14px;border-radius:99px;border:1px solid var(--bg5);font-size:.7rem;color:var(--t3);font-weight:500">${f}</div>`).join('')}
+<div style="display:inline-flex;align-items:center;gap:6px;padding:5px 14px;background:var(--acg);border:1px solid var(--acb);border-radius:99px;margin-bottom:20px;font-size:.6rem;font-weight:600;color:var(--ac);letter-spacing:1px;text-transform:uppercase">Plateforme coaching pro</div>
+<h1 style="font-family:var(--fs);font-size:3.2rem;color:var(--t);font-weight:700;letter-spacing:-.5px;line-height:1.05">L'outil qui<br>transforme votre<br><span style="color:var(--ac);font-style:italic">coaching</span></h1>
+<p style="font-size:.88rem;color:var(--t3);margin-top:18px;line-height:1.75;max-width:360px;font-weight:300">Centralisez la gestion de vos clients, séances, programmes et performances dans une plateforme connectée en temps réel.</p>
+<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:28px">
+${['Séances & calendrier','Chat temps réel','Programmes','Timer WOD','Nutrition','Performances'].map(f=>`<div style="padding:6px 14px;border-radius:99px;border:1px solid rgba(255,255,255,.06);font-size:.66rem;color:var(--t4);font-weight:500;background:rgba(255,255,255,.015)">${f}</div>`).join('')}
+</div>
+<div style="display:flex;align-items:center;gap:16px;margin-top:32px">
+<div style="display:flex;align-items:center;gap:4px">${[1,2,3].map(()=>`<div style="width:24px;height:24px;border-radius:50%;background:var(--s2);border:2px solid var(--bg);margin-left:-6px;display:flex;align-items:center;justify-content:center;font-size:.5rem;color:var(--t4)">●</div>`).join('')}</div>
+<span style="font-size:.68rem;color:var(--t4)">Utilisé par des coachs</span>
 </div>
 </div>
-<!-- Right: Auth form -->
-<div style="background:var(--bg2);border:1px solid rgba(255,255,255,.05);border-radius:16px;padding:28px">
-<h2 style="font-family:var(--fs);font-size:1.6rem;font-style:italic;margin-bottom:3px">${authMode==='login'?'Connexion':'Créer un compte'}</h2>
-<p style="color:var(--t4);font-size:.76rem;margin-bottom:18px">${authMode==='login'?'Accédez à votre espace':'Inscription gratuite'}</p>
+<div style="background:linear-gradient(170deg,var(--bg2),rgba(12,12,16,.95));border:1px solid rgba(255,255,255,.06);border-radius:18px;padding:30px;box-shadow:var(--shadow-lg),0 0 60px rgba(200,255,0,.02)">
+<h2 style="font-family:var(--fs);font-size:1.5rem;font-weight:700;margin-bottom:4px">${authMode==='login'?'Connexion':'Créer un compte'}</h2>
+<p style="color:var(--t4);font-size:.74rem;margin-bottom:20px;font-weight:300">${authMode==='login'?'Accédez à votre espace':'Inscription gratuite · 30 secondes'}</p>
 ${authMode==='register'?`
 <div class="fg"><label class="lb">Nom complet</label><input id="rN" placeholder="Jean Dupont"></div>
 <div class="fg"><label class="lb">Email</label><input id="rE" type="email" placeholder="email@exemple.com"></div>
-<div class="fg"><label class="lb">Mot de passe (min 6)</label><input id="rP" type="password" placeholder="••••••••"></div>
-<button class="b bp" style="width:100%" onclick="handleReg()">Créer mon compte</button>
-<p style="text-align:center;margin-top:14px;font-size:.74rem;color:var(--t4)">Déjà un compte ? <a onclick="authMode='login';R()">Se connecter</a></p>
+<div class="fg"><label class="lb">Mot de passe</label><input id="rP" type="password" placeholder="Min. 6 caractères"></div>
+<button class="b bp" style="width:100%;justify-content:center;padding:12px" onclick="handleReg()">Créer mon compte</button>
+<p style="text-align:center;margin-top:16px;font-size:.72rem;color:var(--t4)">Déjà un compte ? <a onclick="authMode='login';R()">Se connecter</a></p>
 `:`
 <div class="fg"><label class="lb">Email</label><input id="lE" type="email" placeholder="email@exemple.com"></div>
 <div class="fg"><label class="lb">Mot de passe</label><input id="lP" type="password" placeholder="••••••••"></div>
-<button class="b bp" style="width:100%" onclick="handleLogin()">Se connecter</button>
-<p style="text-align:center;margin-top:14px;font-size:.74rem;color:var(--t4)">Pas de compte ? <a onclick="authMode='register';R()">S'inscrire</a></p>
+<button class="b bp" style="width:100%;justify-content:center;padding:12px" onclick="handleLogin()">Se connecter</button>
+<p style="text-align:center;margin-top:16px;font-size:.72rem;color:var(--t4)">Pas de compte ? <a onclick="authMode='register';R()">Commencer gratuitement</a></p>
 `}
 </div>
 </div></div>
-<!-- Footer -->
-<div style="padding:12px 24px;text-align:center;font-size:.6rem;color:var(--t4);position:relative;z-index:1">FORGE — Coaching Platform · Propulsé par Supabase</div>
-<style>#authGrid{grid-template-columns:1fr 400px}@media(max-width:850px){#authGrid{grid-template-columns:1fr!important;gap:30px!important;text-align:center}#authGrid h1{font-size:2.5rem!important}#authGrid p{max-width:100%!important}#authGrid>div:first-child div:last-child{justify-content:center}}</style>
+<div style="padding:16px 32px;text-align:center;font-size:.55rem;color:var(--t4);position:relative;z-index:1;letter-spacing:1px">FORGE · COACHING PLATFORM</div>
+<style>#authGrid{grid-template-columns:1fr 380px}@media(max-width:850px){#authGrid{grid-template-columns:1fr!important;gap:32px!important;text-align:center}#authGrid h1{font-size:2.4rem!important}#authGrid p{max-width:100%!important;margin-left:auto;margin-right:auto}#authGrid>div:first-child>div:last-of-type{justify-content:center}#authGrid>div:first-child div[style*="flex-wrap"]{justify-content:center}}</style>
 </div>`;}
 
 async function handleLogin(){const e=document.getElementById('lE')?.value,p=document.getElementById('lP')?.value;if(!e||!p){toast('Champs requis','err');return;}S.loading=true;R();await doSignIn(e,p);}
