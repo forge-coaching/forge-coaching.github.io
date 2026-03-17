@@ -39,32 +39,45 @@ play:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></sv
 
 // ===== AUTH =====
 async function doSignUp(email,pass,name,role){
+  console.log('[FORGE] Signup attempt:', email, role);
   const{data,error}=await sb.auth.signUp({email,password:pass,options:{data:{full_name:name,role}}});
-  if(error){toast(error.message,'err');return false;}
-  // If email confirmation is disabled, user is auto-logged in
-  if(data.session){toast('Compte créé ! Bienvenue !');return true;}
-  // If email confirmation is required, try to sign in directly
-  const{data:loginData,error:loginErr}=await sb.auth.signInWithPassword({email,password:pass});
-  if(loginErr){toast('Compte créé ! Connectez-vous.','inf');return true;}
-  toast('Compte créé ! Bienvenue !');return true;
+  if(error){console.error('[FORGE] Signup error:', error);toast(error.message,'err');S.loading=false;R();return;}
+  console.log('[FORGE] Signup response:', data);
+  if(data.user&&!data.session){
+    // Email confirmation required — try direct login
+    console.log('[FORGE] No session, trying direct login...');
+    const{data:d2,error:e2}=await sb.auth.signInWithPassword({email,password:pass});
+    if(e2){console.error('[FORGE] Auto-login failed:', e2);toast('Compte créé ! Confirmez votre email ou connectez-vous.','inf');S.loading=false;R();return;}
+    console.log('[FORGE] Auto-login success');
+  }
+  toast('Bienvenue !');
 }
 async function doSignIn(email,pass){
+  console.log('[FORGE] Login attempt:', email);
   const{data,error}=await sb.auth.signInWithPassword({email,password:pass});
-  if(error){toast(error.message,'err');return false;}
-  return true;
+  if(error){console.error('[FORGE] Login error:', error);toast(error.message,'err');S.loading=false;R();return;}
+  console.log('[FORGE] Login success:', data.user?.id);
 }
 async function doSignOut(){await sb.auth.signOut();S.user=null;S.profile=null;S.clients=[];R();}
 
 // ===== DATA LOADERS =====
 async function loadProfile(){
-  const{data,error}=await sb.from('profiles').select('*').eq('id',S.user.id).single();
+  console.log('[FORGE] Loading profile for:', S.user.id);
+  const{data,error}=await sb.from('profiles').select('*').eq('id',S.user.id).maybeSingle();
+  console.log('[FORGE] Profile query result:', data, error);
   if(data){S.profile=data;return;}
-  // Profile missing — create it from auth user metadata
+  // Profile missing — create it
+  console.log('[FORGE] Profile not found, creating...');
   const meta=S.user.user_metadata||{};
-  const newProfile={id:S.user.id,email:S.user.email,full_name:meta.full_name||S.user.email.split('@')[0],role:meta.role||'client'};
-  const{data:created,error:insertErr}=await sb.from('profiles').insert(newProfile).select().single();
-  if(insertErr){console.error('Profile creation failed:',insertErr);S.profile=newProfile;}
-  else{S.profile=created;}
+  const newP={id:S.user.id,email:S.user.email,full_name:meta.full_name||S.user.email.split('@')[0],role:meta.role||'client'};
+  const{data:created,error:iErr}=await sb.from('profiles').insert(newP).select().maybeSingle();
+  console.log('[FORGE] Profile insert result:', created, iErr);
+  if(iErr){
+    console.error('[FORGE] Profile insert failed, using local fallback');
+    S.profile=newP; // Use local fallback so app doesn't crash
+  } else {
+    S.profile=created;
+  }
 }
 async function loadClients(){
   if(S.profile?.role==='coach'){const{data}=await sb.from('clients').select('*').eq('coach_id',S.user.id).order('created_at',{ascending:false});S.clients=data||[];}
@@ -85,7 +98,22 @@ async function loadSurveys(){
 async function loadFoods(){const{data}=await sb.from('foods').select('*').order('name');S.foods=data||[];}
 async function loadMsgs(cid){const{data}=await sb.from('messages').select('*').eq('client_id',cid).order('created_at');return data||[];}
 async function loadPerfs(cid){const{data}=await sb.from('performances').select('*').eq('client_id',cid).order('date');return data||[];}
-async function loadAll(){S.loading=true;R();await loadProfile();await loadClients();await loadSessions();await loadPrograms();await loadSurveys();await loadFoods();S.loading=false;R();}
+async function loadAll(){
+  console.log('[FORGE] loadAll starting...');
+  S.loading=true;R();
+  try{
+    await loadProfile();
+    console.log('[FORGE] Profile loaded:', S.profile?.role);
+    await loadClients();
+    console.log('[FORGE] Clients loaded:', S.clients.length);
+    await loadSessions();
+    await loadPrograms();
+    await loadSurveys();
+    await loadFoods();
+    console.log('[FORGE] All data loaded');
+  }catch(e){console.error('[FORGE] loadAll error:', e);}
+  S.loading=false;R();
+}
 
 // ===== REALTIME =====
 function subRealtime(){
@@ -95,7 +123,8 @@ function subRealtime(){
 
 // ===== AUTH LISTENER =====
 sb.auth.onAuthStateChange(async(ev,session)=>{
-  if(session?.user){S.user=session.user;await loadAll();subRealtime();toast('Bienvenue !');}
+  console.log('[FORGE] Auth state change:', ev, session?.user?.email);
+  if(session?.user){S.user=session.user;await loadAll();subRealtime();}
   else{S.user=null;S.profile=null;S.loading=false;R();}
 });
 (async()=>{const{data:{session}}=await sb.auth.getSession();if(!session){S.loading=false;R();}})();
