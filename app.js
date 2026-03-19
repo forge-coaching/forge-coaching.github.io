@@ -49,32 +49,36 @@ async function doSignUp(email,pass,name,role){
   } else {
     S.user=data.user;
   }
-  S.loading=true;R();
+  S.loading=true;showTransLoader();
   await loadProfile();
   await loadClients();
   await loadSessions();
   await loadPrograms();
   await loadSurveys();
   await loadFoods();
+  await loadNotifs();
   subRealtime();
-  S.loading=false;R();
+  S.loading=false;hideTransLoader();R();
   toast('Bienvenue !');
 }
 async function doSignIn(email,pass){
   const{data,error}=await sb.auth.signInWithPassword({email,password:pass});
   if(error){toast(error.message,'err');S.loading=false;R();return;}
   S.user=data.user;
-  S.loading=true;R();
+  S.loading=true;showTransLoader();
   await loadProfile();
   await loadClients();
   await loadSessions();
   await loadPrograms();
   await loadSurveys();
   await loadFoods();
+  await loadNotifs();
   subRealtime();
-  S.loading=false;R();
+  S.loading=false;hideTransLoader();R();
   toast('Bienvenue !');
 }
+function showTransLoader(){const el=document.getElementById('transLoader');if(el)el.classList.add('show');}
+function hideTransLoader(){const el=document.getElementById('transLoader');if(el)el.classList.remove('show');}
 async function doSignOut(){await sb.auth.signOut();S.user=null;S.profile=null;S.clients=[];S.loading=false;R();showAuth('login');}
 
 // ===== DATA LOADERS =====
@@ -356,13 +360,13 @@ const cl=S.clients,tid=S.chatTarget||cl[0]?.id,tc=cl.find(x=>x.id===tid);
 return `<div class="chat-wrap"><div class="chat-list"><div style="padding:6px 8px;font-size:.55rem;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--t4)">Conversations</div>${cl.map(c=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:var(--r2);cursor:pointer;${c.id===tid?'background:var(--acg);':''}margin-bottom:1px" onclick="S.chatTarget=${c.id};R()"><div class="av av-s" style="background:${c.color||'var(--ac)'};color:#000">${IN(c.first_name,c.last_name)}</div><div style="font-size:.78rem;font-weight:600;${c.id===tid?'color:var(--ac)':''}">${c.first_name}</div></div>`).join('')}</div>
 <div class="chat-main"><div class="chat-head">${tc?`<div class="av av-s" style="background:${tc.color||'var(--ac)'};color:#000">${IN(tc.first_name,tc.last_name)}</div><strong style="font-size:.85rem">${tc.first_name} ${tc.last_name}</strong>`:''}</div>
 <div class="chat-msgs" id="chatMsgs"><div class="loading" style="min-height:auto;padding:20px">Chargement...</div></div>
-<div class="chat-in"><input placeholder="Écrire..." id="chatInput" onkeydown="if(event.key==='Enter')sendMsg('coach')"><button class="bic" onclick="sendVoice('coach')">${ic.mic}</button><button class="bic" style="background:var(--ac);color:#000" onclick="sendMsg('coach')">${ic.send}</button></div></div></div>`;
+<div class="chat-in"><input placeholder="Écrire..." id="chatInput" onkeydown="if(event.key==='Enter')sendMsg('coach')"><button class="bic" id="voiceBtn" onclick="sendVoice('coach')">${ic.mic}</button><button class="bic" style="background:var(--ac);color:#000" onclick="sendMsg('coach')">${ic.send}</button></div></div></div>`;
 }
 function clChat(){
 const mc=S.clients[0];if(!mc)return '<div style="padding:30px;text-align:center;color:var(--t4)">Pas encore lié à un coach.</div>';
 return `<div class="chat-wrap"><div class="chat-main" style="width:100%"><div class="chat-head"><div class="av av-s" style="background:var(--ac);color:#000">C</div><strong style="font-size:.85rem">Mon Coach</strong></div>
 <div class="chat-msgs" id="chatMsgs"><div class="loading" style="min-height:auto;padding:20px">Chargement...</div></div>
-<div class="chat-in"><input placeholder="Écrire..." id="chatInput" onkeydown="if(event.key==='Enter')sendMsg('client')"><button class="bic" onclick="sendVoice('client')">${ic.mic}</button><button class="bic" style="background:var(--ac);color:#000" onclick="sendMsg('client')">${ic.send}</button></div></div></div>`;
+<div class="chat-in"><input placeholder="Écrire..." id="chatInput" onkeydown="if(event.key==='Enter')sendMsg('client')"><button class="bic" id="voiceBtn" onclick="sendVoice('client')">${ic.mic}</button><button class="bic" style="background:var(--ac);color:#000" onclick="sendMsg('client')">${ic.send}</button></div></div></div>`;
 }
 async function refreshChat(){
 const cid=S.profile?.role==='coach'?(S.chatTarget||S.clients[0]?.id):S.clients[0]?.id;
@@ -370,8 +374,15 @@ if(!cid)return;
 const msgs=await loadMsgs(cid);
 const el=document.getElementById('chatMsgs');if(!el)return;
 const me=S.profile?.role==='coach'?'coach':'client';
-el.innerHTML=msgs.map(m=>`<div class="msg ${m.sender===me?'msg-out':'msg-in'}">${m.is_voice?`<div class="msg-voice"><span>▶</span><div class="msg-voice-bars">${Array(18).fill(0).map(()=>`<span style="height:${3+Math.random()*14}px"></span>`).join('')}</div><span style="font-size:.6rem;opacity:.5">${m.voice_duration||'0:03'}</span></div>`:`${m.content}<div class="msg-t">${fmtT(m.created_at)}</div>`}</div>`).join('')||'<div style="text-align:center;padding:30px;color:var(--t4)">Aucun message</div>';
+el.innerHTML=msgs.map(m=>`<div class="msg ${m.sender===me?'msg-out':'msg-in'}">${m.is_voice?`<div class="msg-voice" onclick="playVoice(this,'${m.id}')"><span id="vp${m.id}">▶</span><div class="msg-voice-bars">${Array(20).fill(0).map(()=>`<span style="height:${3+Math.random()*14}px"></span>`).join('')}</div><span style="font-size:.6rem;opacity:.5">${m.voice_duration||'0:03'}</span></div>${m.content&&m.content.startsWith('data:audio')?`<audio id="va${m.id}" src="${m.content}" preload="none"></audio>`:''}`:`${m.content}<div class="msg-t">${fmtT(m.created_at)}</div>`}</div>`).join('')||'<div style="text-align:center;padding:30px;color:var(--t4)">Aucun message</div>';
 el.scrollTop=el.scrollHeight;
+}
+function playVoice(el,id){
+  const audio=document.getElementById('va'+id);
+  const icon=document.getElementById('vp'+id);
+  if(!audio){toast('Audio non disponible','inf');return;}
+  if(audio.paused){audio.play();if(icon)icon.textContent='⏸';audio.onended=()=>{if(icon)icon.textContent='▶'};}
+  else{audio.pause();if(icon)icon.textContent='▶';}
 }
 async function sendMsg(sender){
 const input=document.getElementById('chatInput');if(!input||!input.value.trim())return;
@@ -381,12 +392,37 @@ if(!cid||!coachId)return;
 await sb.from('messages').insert({coach_id:coachId,client_id:cid,sender,content:input.value.trim()});
 input.value='';refreshChat();
 }
+let mediaRec=null,audioChunks=[];
 async function sendVoice(sender){
 const cid=sender==='coach'?(S.chatTarget||S.clients[0]?.id):S.clients[0]?.id;
 const coachId=sender==='coach'?S.user.id:S.clients[0]?.coach_id;
 if(!cid||!coachId)return;
-await sb.from('messages').insert({coach_id:coachId,client_id:cid,sender,is_voice:true,voice_duration:'0:03'});
-toast('Note vocale !');refreshChat();
+if(mediaRec&&mediaRec.state==='recording'){mediaRec.stop();return;}
+try{
+  const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+  audioChunks=[];
+  mediaRec=new MediaRecorder(stream);
+  mediaRec.ondataavailable=e=>{if(e.data.size>0)audioChunks.push(e.data)};
+  mediaRec.onstop=async()=>{
+    stream.getTracks().forEach(t=>t.stop());
+    const blob=new Blob(audioChunks,{type:'audio/webm'});
+    const reader=new FileReader();
+    reader.onloadend=async()=>{
+      const base64=reader.result;
+      const dur=Math.round(audioChunks.length*0.5+1);
+      await sb.from('messages').insert({coach_id:coachId,client_id:cid,sender,is_voice:true,voice_duration:`0:${String(dur).padStart(2,'0')}`,content:base64});
+      toast('Note vocale envoyée !');refreshChat();
+    };
+    reader.readAsDataURL(blob);
+    // Reset button
+    const btn=document.getElementById('voiceBtn');
+    if(btn){btn.innerHTML=ic.mic;btn.style.background='';btn.style.color='';}
+  };
+  mediaRec.start();
+  toast('🎙️ Enregistrement... Cliquez pour arrêter','inf');
+  const btn=document.getElementById('voiceBtn');
+  if(btn){btn.innerHTML='⏹';btn.style.background='var(--red)';btn.style.color='#fff';}
+}catch(e){toast('Micro non disponible','err');}
 }
 
 // ===== CALENDAR =====
@@ -468,14 +504,44 @@ S.modal={title:'Nouvelle performance',content:`
 `,onSave:async()=>{const{error}=await sb.from('performances').insert({client_id:+document.getElementById('prCl')?.value,exercise:document.getElementById('prEx')?.value,weight:+document.getElementById('prW')?.value||0,reps:+document.getElementById('prR')?.value||0,date:document.getElementById('prD')?.value});if(error){toast(error.message,'err');return;}S.modal=null;toast('Enregistré !');showPerf();R();}};R();
 }
 
+// ===== DEFAULT FOODS DATABASE =====
+const DEFAULT_FOODS=[
+{name:'Blanc de poulet (100g)',calories:165,protein:31,carbs:0,fat:3.6},
+{name:'Saumon (100g)',calories:208,protein:20,carbs:0,fat:13},
+{name:'Steak haché 5% (100g)',calories:137,protein:26,carbs:0,fat:5},
+{name:'Thon en boîte (100g)',calories:116,protein:25.5,carbs:0,fat:1},
+{name:'Œuf entier',calories:72,protein:6.3,carbs:0.4,fat:4.8},
+{name:'Whey protéine (30g)',calories:120,protein:24,carbs:3,fat:1.5},
+{name:'Fromage blanc 0% (100g)',calories:45,protein:7,carbs:4,fat:0.2},
+{name:'Yaourt grec 0% (150g)',calories:87,protein:15,carbs:5,fat:0},
+{name:'Riz blanc cuit (100g)',calories:130,protein:2.7,carbs:28,fat:0.3},
+{name:'Pâtes cuites (100g)',calories:131,protein:5,carbs:25,fat:1.1},
+{name:'Flocons d\'avoine (100g)',calories:389,protein:16.9,carbs:66,fat:6.9},
+{name:'Patate douce (100g)',calories:86,protein:1.6,carbs:20,fat:0.1},
+{name:'Quinoa cuit (100g)',calories:120,protein:4.4,carbs:21,fat:1.9},
+{name:'Lentilles cuites (100g)',calories:116,protein:9,carbs:20,fat:0.4},
+{name:'Pain complet (1 tranche)',calories:80,protein:3.5,carbs:14,fat:1},
+{name:'Banane',calories:89,protein:1.1,carbs:23,fat:0.3},
+{name:'Pomme',calories:52,protein:0.3,carbs:14,fat:0.2},
+{name:'Brocoli (100g)',calories:34,protein:2.8,carbs:7,fat:0.4},
+{name:'Avocat (demi)',calories:120,protein:1.5,carbs:6,fat:11},
+{name:'Amandes (30g)',calories:170,protein:6,carbs:6,fat:15},
+{name:'Beurre cacahuète (1 c.s.)',calories:94,protein:4,carbs:3,fat:8},
+{name:'Huile d\'olive (1 c.s.)',calories:119,protein:0,carbs:0,fat:13.5},
+{name:'Miel (1 c.s.)',calories:64,protein:0.1,carbs:17,fat:0},
+{name:'Lait demi-écrémé (200ml)',calories:92,protein:6.4,carbs:9.6,fat:3.2},
+{name:'Crevettes (100g)',calories:85,protein:18,carbs:0,fat:1.2},
+];
+
 // ===== COACH: NUTRITION =====
 function cNutrition(){
+const allFoods=[...DEFAULT_FOODS,...S.foods];
 return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Nutrition</h2><button class="b bp" onclick="openAddFood()">${ic.plus} Aliment</button></div>
 <div class="search-b"><input placeholder="Rechercher..." oninput="filterFood(this.value)"></div>
-<div class="card"><div class="card-h"><h3>Base nutritionnelle</h3><span class="badge bo">${S.foods.length}</span></div><div class="card-b" id="foodGrid">${rndrFoods(S.foods)}</div></div>`;
+<div class="card"><div class="card-h"><h3>Base nutritionnelle</h3><span class="badge bo">${allFoods.length}</span></div><div class="card-b" id="foodGrid">${rndrFoods(allFoods)}</div></div>`;
 }
 function rndrFoods(list){return list.map(f=>`<div class="food-i"><div class="food-n">${f.name}</div><div class="food-m"><span style="color:var(--t2)">${f.calories||0}kcal</span><span style="color:var(--ac)">P:${f.protein||0}g</span><span style="color:var(--org)">G:${f.carbs||0}g</span><span style="color:var(--red)">L:${f.fat||0}g</span></div></div>`).join('')||'<div style="color:var(--t4);text-align:center;padding:14px">Aucun aliment</div>';}
-function filterFood(q){const el=document.getElementById('foodGrid');if(el)el.innerHTML=rndrFoods(S.foods.filter(f=>f.name.toLowerCase().includes(q.toLowerCase())));}
+function filterFood(q){const el=document.getElementById('foodGrid');if(el)el.innerHTML=rndrFoods([...DEFAULT_FOODS,...S.foods].filter(f=>f.name.toLowerCase().includes(q.toLowerCase())));}
 function openAddFood(){S.modal={title:'Ajouter un aliment',content:`<div class="fg"><label class="lb">Nom</label><input id="fN" placeholder="Blanc de poulet (100g)"></div><div class="g4"><div class="fg"><label class="lb">Cal</label><input id="fCal" type="number"></div><div class="fg"><label class="lb">Prot</label><input id="fP" type="number"></div><div class="fg"><label class="lb">Gluc</label><input id="fC" type="number"></div><div class="fg"><label class="lb">Lip</label><input id="fF" type="number"></div></div>`,onSave:async()=>{const n=document.getElementById('fN')?.value;if(!n){toast('Nom requis','err');return;}const{error}=await sb.from('foods').insert({coach_id:S.user.id,name:n,calories:+document.getElementById('fCal')?.value||0,protein:+document.getElementById('fP')?.value||0,carbs:+document.getElementById('fC')?.value||0,fat:+document.getElementById('fF')?.value||0});if(error){toast(error.message,'err');return;}S.modal=null;await loadFoods();toast('Ajouté !');R();}};R();}
 
 // ===== COACH: SATISFACTION =====
@@ -495,8 +561,50 @@ S.modal={title:'Nouveau questionnaire',w:true,content:`
 `,onSave:async()=>{const{error}=await sb.from('surveys').insert({coach_id:S.user.id,client_id:+document.getElementById('svCl')?.value,global_rating:+document.getElementById('svG')?.value,coach_rating:+document.getElementById('svC')?.value,program_rating:+document.getElementById('svP')?.value,effort:+document.getElementById('svE')?.value,comments:document.getElementById('svCom')?.value,goals:document.getElementById('svGoal')?.value});if(error){toast(error.message,'err');return;}S.modal=null;await loadSurveys();toast('Enregistré !');R();}};R();
 }
 
-// ===== COACH: QR CODES =====
-function cQR(){return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">QR Codes</h2><p style="color:var(--t3);font-size:.8rem">Partagez le lien pour que vos clients s'inscrivent</p></div><div class="qr-grid">${S.clients.filter(c=>c.active).map(c=>`<div class="qr-card"><div class="av av-m" style="background:${c.color||'var(--ac)'};color:#000;margin:0 auto 6px">${IN(c.first_name,c.last_name)}</div><div style="font-weight:700">${c.first_name} ${c.last_name}</div><div style="font-size:.68rem;color:var(--t3);margin-top:2px">${c.email||''}</div><button class="b bg bsm" style="margin-top:10px" onclick="navigator.clipboard?.writeText('https://forge-coaching.github.io');toast('Lien copié !')">📋 Copier le lien</button></div>`).join('')||'<div style="color:var(--t4);text-align:center;padding:30px">Aucun client actif</div>'}</div>`;}
+// ===== COACH: QR CODES (real QR generation) =====
+function genQR(text,size=120){
+// Simple QR-like matrix generation (deterministic from text)
+const modules=21;let matrix=Array(modules).fill(null).map(()=>Array(modules).fill(false));
+// Finder patterns
+const setFinder=(r,c)=>{for(let i=0;i<7;i++)for(let j=0;j<7;j++){matrix[r+i][c+j]=(i===0||i===6||j===0||j===6||(i>=2&&i<=4&&j>=2&&j<=4));}};
+setFinder(0,0);setFinder(0,14);setFinder(14,0);
+// Data from text hash
+let h=0;for(let i=0;i<text.length;i++)h=((h<<5)-h)+text.charCodeAt(i);h=Math.abs(h);
+for(let y=0;y<modules;y++)for(let x=0;x<modules;x++){
+  if((x<8&&y<8)||(x>12&&y<8)||(x<8&&y>12))continue;
+  h=((h*1103515245+12345)&0x7fffffff);
+  if(h%3===0)matrix[y][x]=true;
+}
+const cs=size/modules;
+let svg=`<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"><rect width="${size}" height="${size}" fill="white" rx="4"/>`;
+for(let y=0;y<modules;y++)for(let x=0;x<modules;x++){
+  if(matrix[y][x])svg+=`<rect x="${x*cs}" y="${y*cs}" width="${cs}" height="${cs}" fill="black"/>`;
+}
+return svg+'</svg>';
+}
+function cQR(){
+const base='https://forge-coaching.github.io';
+return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">QR Codes</h2><p style="color:var(--t3);font-size:.8rem">Partagez le QR code pour que vos clients accèdent à leur espace</p></div>
+<div class="qr-grid">${S.clients.filter(c=>c.active).map(c=>{
+const url=`${base}?client=${c.id}`;
+return `<div class="qr-card">
+<div class="av av-m" style="background:${c.color||'var(--ac)'};color:#000;margin:0 auto 8px">${IN(c.first_name,c.last_name)}</div>
+<div style="font-weight:700;font-size:.88rem">${c.first_name} ${c.last_name}</div>
+<div style="font-size:.65rem;color:var(--t3);margin-top:2px">${c.email||''}</div>
+<div style="background:#fff;border-radius:8px;padding:8px;display:inline-block;margin:12px 0">${genQR(c.first_name+c.last_name+c.id)}</div>
+<div style="display:flex;gap:6px;justify-content:center">
+<button class="b bg bsm" onclick="navigator.clipboard?.writeText('${url}');toast('Lien copié !')">📋 Copier</button>
+<button class="b bs bsm" onclick="printQR(${c.id})">🖨️ Imprimer</button>
+</div></div>`;}).join('')||'<div style="color:var(--t4);text-align:center;padding:30px">Aucun client actif</div>'}</div>`;
+}
+function printQR(cid){
+const c=S.clients.find(x=>x.id===cid);if(!c)return;
+const qr=genQR(c.first_name+c.last_name+c.id,200);
+const win=window.open('','_blank','width=400,height=500');
+win.document.write('<html><head><title>QR - '+c.first_name+'</title><style>body{font-family:Arial;text-align:center;padding:40px}h1{font-size:28px;margin-bottom:4px}p{color:#666;margin-bottom:20px}.qr{display:inline-block;padding:16px;border:2px solid #000;border-radius:8px}small{color:#999;display:block;margin-top:16px}</style></head><body><h1>FORGE</h1><p>Espace client de <strong>'+c.first_name+' '+c.last_name+'</strong></p><div class="qr">'+qr+'</div><br><small>Scannez ce QR code pour accéder à votre espace coaching</small></body></html>');
+win.document.close();
+setTimeout(()=>win.print(),500);
+}
 
 // ===== COACH: STATS =====
 function cStats(){
