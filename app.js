@@ -450,12 +450,34 @@ const se=S.sessions,cl=S.clients;const now=new Date(),y=now.getFullYear(),m=now.
 const fd=new Date(y,m,1).getDay(),af=(fd+6)%7,dim=new Date(y,m+1,0).getDate();
 const dn=['L','M','M','J','V','S','D'],mn=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 const cells=[];for(let i=0;i<af;i++)cells.push({d:0});
-for(let i=1;i<=dim;i++){const ds=`${y}-${String(m+1).padStart(2,'0')}-${String(i).padStart(2,'0')}`;cells.push({d:i,today:i===td,ss:se.filter(s=>s.date===ds)});}
+for(let i=1;i<=dim;i++){const ds=`${y}-${String(m+1).padStart(2,'0')}-${String(i).padStart(2,'0')}`;cells.push({d:i,today:i===td,ss:se.filter(s=>s.date===ds),ds});}
 while(cells.length%7)cells.push({d:0});
 return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">${mn[m]} ${y}</h2><button class="b bp" onclick="openAddSess()">${ic.plus} Séance</button></div>
-<div class="card" style="margin-bottom:12px"><div class="card-b"><div class="cal">${dn.map(d=>`<div class="cal-hd">${d}</div>`).join('')}${cells.map(c=>!c.d?'<div class="cal-d oth"></div>':`<div class="cal-d ${c.today?'today':''} ${c.ss?.length?'has':''}">${c.d}</div>`).join('')}</div></div></div>
-<div class="card"><div class="card-h"><h3>Séances à venir</h3></div><div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Heure</th><th>Client</th><th>Type</th><th></th></tr></thead><tbody>${se.filter(s=>s.status==='upcoming').map(s=>{const c=cl.find(x=>x.id===s.client_id);return `<tr><td style="font-family:var(--fm)">${s.date}</td><td style="font-family:var(--fm)">${s.time||''}</td><td>${c?c.first_name+' '+c.last_name:'—'}</td><td><span class="badge bo">${s.type||''}</span></td><td><button class="b bg bsm" onclick="complSess(${s.id})">✓</button></td></tr>`;}).join('')||'<tr><td colspan="5" style="text-align:center;color:var(--t4);padding:16px">Aucune</td></tr>'}</tbody></table></div></div>`;
+<div class="card" style="margin-bottom:12px"><div class="card-b"><div class="cal">${dn.map(d=>`<div class="cal-hd">${d}</div>`).join('')}${cells.map(c=>!c.d?'<div class="cal-d oth"></div>':`<div class="cal-d ${c.today?'today':''} ${c.ss?.length?'has':''}" onclick="showDaySess('${c.ds}')" style="cursor:pointer">${c.d}</div>`).join('')}</div></div></div>
+<div id="dayDetail"></div>
+<div class="card"><div class="card-h"><h3>Toutes les séances</h3></div><div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Heure</th><th>Client</th><th>Type</th><th>Statut</th><th></th></tr></thead><tbody>${se.map(s=>{const c=cl.find(x=>x.id===s.client_id);return `<tr><td style="font-family:var(--fm)">${s.date}</td><td style="font-family:var(--fm)">${s.time||''}</td><td>${c?c.first_name+' '+c.last_name:'—'}</td><td><span class="badge bo">${s.type||''}</span></td><td>${s.status==='done'?'<span class="badge bgr">Fait</span>':'<span class="badge ba">À venir</span>'}</td><td style="display:flex;gap:4px">${s.status==='upcoming'?`<button class="b bg bsm" onclick="complSess(${s.id})">✓</button>`:''}
+<button class="b bs bsm" onclick="editSess(${s.id})">✏️</button><button class="b bd bsm" onclick="delSess(${s.id})">🗑</button></td></tr>`;}).join('')||'<tr><td colspan="6" style="text-align:center;color:var(--t4);padding:16px">Aucune</td></tr>'}</tbody></table></div></div>`;
 }
+function showDaySess(ds){
+const se=S.sessions.filter(s=>s.date===ds);const cl=S.clients;
+const el=document.getElementById('dayDetail');if(!el)return;
+if(!se.length){el.innerHTML=`<div class="card"><div class="card-b" style="text-align:center;color:var(--t4);padding:14px">Aucune séance le ${ds}<br><button class="b bg bsm" style="margin-top:8px" onclick="openAddSessDate('${ds}')">+ Ajouter</button></div></div>`;return;}
+el.innerHTML=`<div class="card"><div class="card-h"><h3>📅 ${ds}</h3><button class="b bg bsm" onclick="openAddSessDate('${ds}')">+ Ajouter</button></div><div class="card-b">${se.map(s=>{const c=cl.find(x=>x.id===s.client_id);return `<div class="sess ${s.status==='done'?'dn':'up'}"><div style="display:flex;justify-content:space-between;align-items:center"><div><strong>${s.time||''}</strong> — ${c?c.first_name+' '+c.last_name:'—'} · <span class="badge bo">${s.type||''}</span></div><div style="display:flex;gap:4px">${s.status==='upcoming'?`<button class="b bg bsm" onclick="complSess(${s.id})">✓</button>`:'<span class="badge bgr">Fait</span>'}<button class="b bs bsm" onclick="editSess(${s.id})">✏️</button><button class="b bd bsm" onclick="delSess(${s.id})">🗑</button></div></div></div>`;}).join('')}</div></div>`;
+}
+function openAddSessDate(ds){
+const cl=S.clients.filter(c=>c.active);
+S.modal={title:'Séance le '+ds,content:`<div class="fg"><label class="lb">Client</label><select id="sC">${cl.map(c=>`<option value="${c.id}">${c.first_name} ${c.last_name}</option>`).join('')}</select></div><div class="g2"><div class="fg"><label class="lb">Heure</label><input id="sT" value="09:00"></div><div class="fg"><label class="lb">Type</label><input id="sType" placeholder="Push, HIIT..."></div></div>`,
+onSave:async()=>{const cid=+document.getElementById('sC')?.value;const time=document.getElementById('sT')?.value;const type=document.getElementById('sType')?.value||'Séance';
+const{error}=await sb.from('sessions').insert({coach_id:S.user.id,client_id:cid,date:ds,time,type});if(error){toast(error.message,'err');return;}
+const c=S.clients.find(x=>x.id===cid);if(c?.user_id)await sb.from('notifications').insert({user_id:c.user_id,client_id:c.id,type:'session',title:'Nouvelle séance',body:`${type} le ${ds} à ${time}`});
+S.modal=null;await loadSessions();toast('Séance ajoutée !');R();}};R();
+}
+async function editSess(id){
+const s=S.sessions.find(x=>x.id===id);if(!s)return;const cl=S.clients.filter(c=>c.active);
+S.modal={title:'Modifier la séance',content:`<div class="fg"><label class="lb">Client</label><select id="sC">${cl.map(c=>`<option value="${c.id}" ${c.id===s.client_id?'selected':''}>${c.first_name} ${c.last_name}</option>`).join('')}</select></div><div class="g2"><div class="fg"><label class="lb">Date</label><input id="sD" type="date" value="${s.date}"></div><div class="fg"><label class="lb">Heure</label><input id="sT" value="${s.time||'09:00'}"></div></div><div class="g2"><div class="fg"><label class="lb">Type</label><input id="sType" value="${s.type||''}"></div><div class="fg"><label class="lb">Statut</label><select id="sSt"><option value="upcoming" ${s.status==='upcoming'?'selected':''}>À venir</option><option value="done" ${s.status==='done'?'selected':''}>Terminée</option></select></div></div>`,
+onSave:async()=>{await sb.from('sessions').update({client_id:+document.getElementById('sC')?.value,date:document.getElementById('sD')?.value,time:document.getElementById('sT')?.value,type:document.getElementById('sType')?.value,status:document.getElementById('sSt')?.value}).eq('id',id);S.modal=null;await loadSessions();toast('Séance modifiée !');R();}};R();
+}
+async function delSess(id){if(!confirm('Supprimer cette séance ?'))return;await sb.from('sessions').delete().eq('id',id);await loadSessions();toast('Séance supprimée','inf');R();}
 function openAddSess(){
 const cl=S.clients.filter(c=>c.active);
 S.modal={title:'Nouvelle séance',content:`<div class="fg"><label class="lb">Client</label><select id="sC">${cl.map(c=>`<option value="${c.id}">${c.first_name} ${c.last_name}</option>`).join('')}</select></div><div class="g2"><div class="fg"><label class="lb">Date</label><input id="sD" type="date" value="${new Date().toISOString().split('T')[0]}"></div><div class="fg"><label class="lb">Heure</label><input id="sT" value="09:00"></div></div><div class="fg"><label class="lb">Type</label><input id="sType" placeholder="Push, HIIT..."></div>`,
@@ -573,7 +595,7 @@ function cSurvey(){
 const sv=S.surveys;const avg=sv.length?(sv.reduce((a,s)=>a+(s.global_rating||0),0)/sv.length).toFixed(1):0;
 return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Satisfaction</h2><button class="b bp" onclick="openAddSurvey()">${ic.plus} Questionnaire</button></div>
 <div class="pills"><div class="pill"><div class="pill-v" style="color:var(--ac)">${avg}/5</div><div class="pill-l">Note moy.</div></div><div class="pill"><div class="pill-v" style="color:var(--grn)">${sv.length}</div><div class="pill-l">Réponses</div></div></div>
-<div class="card"><div class="card-b">${sv.map(s=>{const c=S.clients.find(x=>x.id===s.client_id);return `<div style="background:var(--bg3);padding:12px;border-radius:var(--r2);border-left:3px solid ${(s.global_rating||0)>=4?'var(--grn)':'var(--org)'};margin-bottom:6px"><div style="display:flex;justify-content:space-between;margin-bottom:3px"><strong style="font-size:.82rem">${c?c.first_name+' '+c.last_name:'—'}</strong><span style="color:var(--ac)">${'★'.repeat(s.global_rating||0)}${'☆'.repeat(5-(s.global_rating||0))}</span></div><div style="display:flex;gap:4px;margin-top:3px"><span class="badge bo">Effort ${s.effort||'—'}/10</span><span class="badge bo">Coach ${s.coach_rating||'—'}/5</span></div>${s.comments?`<p style="font-size:.75rem;color:var(--t2);margin-top:4px">"${s.comments}"</p>`:''}</div>`;}).join('')||'<div style="color:var(--t4);text-align:center;padding:16px">Aucun</div>'}</div></div>`;
+<div class="card"><div class="card-b">${sv.map(s=>{const c=S.clients.find(x=>x.id===s.client_id);return `<div style="background:var(--bg3);padding:12px;border-radius:var(--r2);border-left:3px solid ${(s.global_rating||0)>=4?'var(--grn)':'var(--org)'};margin-bottom:6px"><div style="display:flex;justify-content:space-between;margin-bottom:3px"><strong style="font-size:.82rem">${c?c.first_name+' '+c.last_name:'—'}</strong><div style="display:flex;align-items:center;gap:8px"><span style="font-size:.65rem;color:var(--t4)">${fmtD(s.date||s.created_at)}</span><span style="color:var(--ac)">${'★'.repeat(s.global_rating||0)}${'☆'.repeat(5-(s.global_rating||0))}</span></div></div><div style="display:flex;gap:4px;margin-top:3px"><span class="badge bo">Effort ${s.effort||'—'}/10</span><span class="badge bo">Coach ${s.coach_rating||'—'}/5</span><span class="badge bo">Prog ${s.program_rating||'—'}/5</span><span class="badge bo">${s.goals||'—'}</span></div>${s.comments?`<p style="font-size:.75rem;color:var(--t2);margin-top:4px">"${s.comments}"</p>`:''}</div>`;}).join('')||'<div style="color:var(--t4);text-align:center;padding:16px">Aucun</div>'}</div></div>`;
 }
 function openAddSurvey(){
 const cl=S.clients.filter(c=>c.active);
@@ -764,22 +786,47 @@ const EX=[
 {n:'Développé militaire',m:'Épaules',s:'Triceps',cat:'Force',type:'Poly',diff:3,eq:'Barre',url:'https://www.youtube.com/results?search_query=développé+militaire',hl:['shoulders','triceps']},
 {n:'Rowing barre',m:'Dos',s:'Biceps',cat:'Force',type:'Poly',diff:3,eq:'Barre',url:'https://www.youtube.com/results?search_query=rowing+barre',hl:['back','biceps']},
 {n:'Hip thrust',m:'Fessiers',s:'Ischio-jambiers',cat:'Force',type:'Poly',diff:2,eq:'Barre',url:'https://www.youtube.com/results?search_query=hip+thrust',hl:['glutes','hamstrings']},
+{n:'Front squat',m:'Quadriceps',s:'Core, Fessiers',cat:'Force',type:'Poly',diff:4,eq:'Barre',url:'https://www.youtube.com/results?search_query=front+squat',hl:['quads','core','glutes']},
 {n:'Curl biceps',m:'Biceps',s:'Avant-bras',cat:'Hypertrophie',type:'Iso',diff:1,eq:'Barre EZ',url:'https://www.youtube.com/results?search_query=curl+biceps',hl:['biceps']},
 {n:'Extensions triceps',m:'Triceps',s:'—',cat:'Hypertrophie',type:'Iso',diff:1,eq:'Poulie',url:'https://www.youtube.com/results?search_query=extension+triceps',hl:['triceps']},
 {n:'Élévations latérales',m:'Épaules',s:'Trapèzes',cat:'Hypertrophie',type:'Iso',diff:1,eq:'Haltères',url:'https://www.youtube.com/results?search_query=élévations+latérales',hl:['shoulders']},
 {n:'Tractions',m:'Dos',s:'Biceps',cat:'Hypertrophie',type:'Poly',diff:3,eq:'Barre fixe',url:'https://www.youtube.com/results?search_query=tractions',hl:['back','biceps']},
 {n:'Dips',m:'Pectoraux',s:'Triceps',cat:'Hypertrophie',type:'Poly',diff:2,eq:'Barres',url:'https://www.youtube.com/results?search_query=dips',hl:['chest','triceps']},
-{n:'Leg extension',m:'Quadriceps',s:'—',cat:'Hypertrophie',type:'Iso',diff:1,eq:'Machine',url:'https://www.youtube.com/results?search_query=leg+extension',hl:['quads']},
-{n:'Leg curl',m:'Ischio-jambiers',s:'—',cat:'Hypertrophie',type:'Iso',diff:1,eq:'Machine',url:'https://www.youtube.com/results?search_query=leg+curl',hl:['hamstrings']},
+{n:'Curl marteau',m:'Biceps',s:'Avant-bras',cat:'Hypertrophie',type:'Iso',diff:1,eq:'Haltères',url:'https://www.youtube.com/results?search_query=curl+marteau',hl:['biceps']},
+{n:'Face pull',m:'Épaules post.',s:'Trapèzes',cat:'Hypertrophie',type:'Iso',diff:1,eq:'Poulie',url:'https://www.youtube.com/results?search_query=face+pull',hl:['shoulders','back']},
+{n:'Développé incliné',m:'Pectoraux haut',s:'Épaules, Triceps',cat:'Hypertrophie',type:'Poly',diff:2,eq:'Haltères+Banc',url:'https://www.youtube.com/results?search_query=développé+incliné+haltères',hl:['chest','shoulders']},
+// MACHINES
+{n:'Leg extension',m:'Quadriceps',s:'—',cat:'Machines',type:'Iso',diff:1,eq:'Machine',url:'https://www.youtube.com/results?search_query=leg+extension+machine',hl:['quads']},
+{n:'Leg curl',m:'Ischio-jambiers',s:'—',cat:'Machines',type:'Iso',diff:1,eq:'Machine',url:'https://www.youtube.com/results?search_query=leg+curl+machine',hl:['hamstrings']},
+{n:'Presse à cuisses',m:'Quadriceps',s:'Fessiers',cat:'Machines',type:'Poly',diff:2,eq:'Machine',url:'https://www.youtube.com/results?search_query=presse+à+cuisses',hl:['quads','glutes']},
+{n:'Pec fly / Butterfly',m:'Pectoraux',s:'—',cat:'Machines',type:'Iso',diff:1,eq:'Machine',url:'https://www.youtube.com/results?search_query=pec+fly+machine',hl:['chest']},
+{n:'Tirage vertical',m:'Dos (dorsal)',s:'Biceps',cat:'Machines',type:'Poly',diff:1,eq:'Machine poulie',url:'https://www.youtube.com/results?search_query=tirage+vertical+poulie',hl:['back','biceps']},
+{n:'Tirage horizontal',m:'Dos',s:'Biceps',cat:'Machines',type:'Poly',diff:1,eq:'Machine poulie',url:'https://www.youtube.com/results?search_query=tirage+horizontal+poulie',hl:['back','biceps']},
+{n:'Chest press',m:'Pectoraux',s:'Triceps',cat:'Machines',type:'Poly',diff:1,eq:'Machine',url:'https://www.youtube.com/results?search_query=chest+press+machine',hl:['chest','triceps']},
+{n:'Shoulder press machine',m:'Épaules',s:'Triceps',cat:'Machines',type:'Poly',diff:1,eq:'Machine',url:'https://www.youtube.com/results?search_query=shoulder+press+machine',hl:['shoulders','triceps']},
+{n:'Hack squat',m:'Quadriceps',s:'Fessiers',cat:'Machines',type:'Poly',diff:2,eq:'Machine',url:'https://www.youtube.com/results?search_query=hack+squat+machine',hl:['quads','glutes']},
+{n:'Hip abducteur',m:'Abducteurs',s:'Fessiers',cat:'Machines',type:'Iso',diff:1,eq:'Machine',url:'https://www.youtube.com/results?search_query=hip+abducteur+machine',hl:['glutes']},
+{n:'Hip adducteur',m:'Adducteurs',s:'—',cat:'Machines',type:'Iso',diff:1,eq:'Machine',url:'https://www.youtube.com/results?search_query=hip+adducteur+machine',hl:['quads']},
+{n:'Mollets machine',m:'Mollets',s:'—',cat:'Machines',type:'Iso',diff:1,eq:'Machine',url:'https://www.youtube.com/results?search_query=mollets+machine',hl:['calves']},
+{n:'Crunch machine',m:'Abdominaux',s:'—',cat:'Machines',type:'Iso',diff:1,eq:'Machine',url:'https://www.youtube.com/results?search_query=crunch+machine+abdos',hl:['core']},
+{n:'Smith machine squat',m:'Quadriceps',s:'Fessiers',cat:'Machines',type:'Poly',diff:2,eq:'Smith machine',url:'https://www.youtube.com/results?search_query=smith+machine+squat',hl:['quads','glutes']},
+// CROSSFIT
 {n:'Clean & Jerk',m:'Full body',s:'Épaules, Quadriceps',cat:'CrossFit',type:'Poly',diff:5,eq:'Barre olympique',url:'https://www.youtube.com/results?search_query=clean+and+jerk',hl:['quads','shoulders','back']},
 {n:'Thrusters',m:'Full body',s:'Quadriceps, Épaules',cat:'CrossFit',type:'Poly',diff:3,eq:'Barre',url:'https://www.youtube.com/results?search_query=thruster',hl:['quads','shoulders']},
 {n:'Burpees',m:'Full body',s:'Cardio',cat:'CrossFit',type:'Poly',diff:2,eq:'Aucun',url:'https://www.youtube.com/results?search_query=burpees',hl:['chest','quads','core']},
 {n:'Kettlebell swing',m:'Ch. postérieure',s:'Core',cat:'CrossFit',type:'Poly',diff:2,eq:'Kettlebell',url:'https://www.youtube.com/results?search_query=kettlebell+swing',hl:['hamstrings','glutes','core']},
+{n:'Wall balls',m:'Quadriceps',s:'Épaules',cat:'CrossFit',type:'Poly',diff:2,eq:'Medicine ball',url:'https://www.youtube.com/results?search_query=wall+balls',hl:['quads','shoulders']},
+{n:'Box jumps',m:'Quadriceps',s:'Mollets',cat:'CrossFit',type:'Poly',diff:2,eq:'Box',url:'https://www.youtube.com/results?search_query=box+jump',hl:['quads','calves']},
+// PILATES
 {n:'The Hundred',m:'Abdominaux',s:'—',cat:'Pilates',type:'Iso',diff:2,eq:'Tapis',url:'https://www.youtube.com/results?search_query=hundred+pilates',hl:['core']},
 {n:'Teaser',m:'Core',s:'Quadriceps',cat:'Pilates',type:'Poly',diff:4,eq:'Tapis',url:'https://www.youtube.com/results?search_query=teaser+pilates',hl:['core','quads']},
+{n:'Swimming',m:'Dos',s:'Fessiers',cat:'Pilates',type:'Poly',diff:2,eq:'Tapis',url:'https://www.youtube.com/results?search_query=swimming+pilates',hl:['back','glutes']},
+// CARDIO
 {n:'Rameur',m:'Full body',s:'Dos, Jambes',cat:'Cardio',type:'Poly',diff:2,eq:'Rameur',url:'https://www.youtube.com/results?search_query=rameur+technique',hl:['back','quads']},
 {n:'Mountain climbers',m:'Core',s:'Épaules',cat:'Cardio',type:'Poly',diff:2,eq:'Aucun',url:'https://www.youtube.com/results?search_query=mountain+climbers',hl:['core','shoulders']},
 {n:'Corde à sauter',m:'Mollets',s:'Épaules',cat:'Cardio',type:'Poly',diff:1,eq:'Corde',url:'https://www.youtube.com/results?search_query=corde+à+sauter',hl:['calves','shoulders']},
+{n:'Course à pied',m:'Jambes',s:'Cardio',cat:'Cardio',type:'Poly',diff:1,eq:'Tapis/Extérieur',url:'https://www.youtube.com/results?search_query=technique+course+à+pied',hl:['quads','hamstrings','calves']},
+{n:'Vélo elliptique',m:'Full body',s:'Cardio',cat:'Cardio',type:'Poly',diff:1,eq:'Machine',url:'https://www.youtube.com/results?search_query=vélo+elliptique',hl:['quads','glutes']},
 ];
 
 function bodysvg(hl=[],w=52,h=68){
@@ -790,15 +837,20 @@ return `<svg viewBox="0 0 100 160" width="${w}" height="${h}" xmlns="http://www.
 function ddots(n){return '<span style="color:var(--ac)">'+'●'.repeat(n)+'</span><span style="color:var(--bg5)">'+'●'.repeat(5-n)+'</span>';}
 
 function pgExercises(){
-const f=S.exFilter,cats=['Tous','Force','Hypertrophie','CrossFit','Pilates','Cardio'];
+const f=S.exFilter,cats=['Tous','Force','Hypertrophie','Machines','CrossFit','Pilates','Cardio'];
 const list=f==='Tous'?EX:EX.filter(e=>e.cat===f);
-return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Bibliothèque</h2><p style="color:var(--t3);font-size:.8rem">${EX.length} exercices</p></div>
+const isCoach=S.profile?.role==='coach';
+return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Bibliothèque</h2><span style="color:var(--t3);font-size:.8rem">${EX.length} exercices</span></div>
 <div class="search-b"><input placeholder="Rechercher..." id="exSrch" oninput="filterEx()"></div>
 <div class="exf-wrap">${cats.map(c=>`<div class="exf ${f===c?'on':''}" onclick="S.exFilter='${c}';R()">${c}</div>`).join('')}</div>
-<div class="exg" id="exGrid">${exCards(list)}</div>`;
+<div class="exg" id="exGrid">${exCards(list,isCoach)}</div>`;
 }
-function exCards(list){return list.map(e=>`<div class="exc" onclick="window.open('${e.url}','_blank')"><div style="width:52px;height:68px;flex-shrink:0">${bodysvg(e.hl)}</div><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:.85rem;margin-bottom:3px">${e.n}</div><div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:3px"><span class="badge ${e.cat==='Force'?'bor':e.cat==='Hypertrophie'?'ba':e.cat==='CrossFit'?'bre':e.cat==='Pilates'?'bpu':'bgr'}">${e.cat}</span><span class="badge ${e.type==='Poly'?'bbl':'bo'}">${e.type==='Poly'?'Polyarticulaire':'Isolation'}</span></div><div style="font-size:.72rem;color:var(--t3)"><strong style="color:var(--t2)">${e.m}</strong> · ${e.s}</div><div style="font-size:.65rem;margin-top:3px">Diff: ${ddots(e.diff)} · ${e.eq}</div></div></div>`).join('');}
-function filterEx(){const q=(document.getElementById('exSrch')?.value||'').toLowerCase();const f=S.exFilter;const l=(f==='Tous'?EX:EX.filter(e=>e.cat===f)).filter(e=>!q||e.n.toLowerCase().includes(q)||e.m.toLowerCase().includes(q));const g=document.getElementById('exGrid');if(g)g.innerHTML=exCards(l);}
+function exCards(list,isCoach){return list.map((e,i)=>`<div class="exc"><div style="width:52px;height:68px;flex-shrink:0;cursor:pointer" onclick="window.open('${e.url}','_blank')">${bodysvg(e.hl)}</div><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:.85rem;margin-bottom:3px;cursor:pointer" onclick="window.open('${e.url}','_blank')">${e.n}</div><div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:3px"><span class="badge ${e.cat==='Force'?'bor':e.cat==='Hypertrophie'?'ba':e.cat==='Machines'?'bbl':e.cat==='CrossFit'?'bre':e.cat==='Pilates'?'bpu':'bgr'}">${e.cat}</span><span class="badge ${e.type==='Poly'?'bbl':'bo'}">${e.type==='Poly'?'Polyarticulaire':'Isolation'}</span></div><div style="font-size:.72rem;color:var(--t3)"><strong style="color:var(--t2)">${e.m}</strong> · ${e.s}</div><div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px"><span style="font-size:.65rem">Diff: ${ddots(e.diff)} · ${e.eq}</span>${isCoach?`<button class="b bs bsm" onclick="editExUrl(${EX.indexOf(e)})" style="font-size:.55rem">✏️ Vidéo</button>`:''}</div></div></div>`).join('');}
+function editExUrl(idx){
+const e=EX[idx];if(!e)return;
+S.modal={title:'Modifier lien vidéo — '+e.n,content:`<div class="fg"><label class="lb">URL YouTube</label><input id="exUrl" value="${e.url}" placeholder="https://youtube.com/..."></div>`,onSave:()=>{const url=document.getElementById('exUrl')?.value;if(url)EX[idx].url=url;S.modal=null;toast('Lien modifié !');R();}};R();
+}
+function filterEx(){const q=(document.getElementById('exSrch')?.value||'').toLowerCase();const f=S.exFilter;const l=(f==='Tous'?EX:EX.filter(e=>e.cat===f)).filter(e=>!q||e.n.toLowerCase().includes(q)||e.m.toLowerCase().includes(q)||e.eq.toLowerCase().includes(q));const g=document.getElementById('exGrid');if(g)g.innerHTML=exCards(l,S.profile?.role==='coach');}
 
 // ===== TIMER =====
 let T={mode:'amrap',on:false,paused:false,sec:0,round:0,iv:null,cfg:{amrap:{min:12},fortime:{cap:20},emom:{min:10,iv:60},tabata:{rounds:8,work:20,rest:10}}};
