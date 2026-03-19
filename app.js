@@ -41,7 +41,6 @@ play:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></sv
 async function doSignUp(email,pass,name,role){
   const{data,error}=await sb.auth.signUp({email,password:pass,options:{data:{full_name:name,role}}});
   if(error){toast(error.message,'err');S.loading=false;R();return;}
-  // Try to sign in directly (works if email confirm is disabled)
   if(!data.session){
     const{data:d2,error:e2}=await sb.auth.signInWithPassword({email,password:pass});
     if(e2){toast('Compte créé ! Connectez-vous.','inf');S.loading=false;R();return;}
@@ -51,6 +50,25 @@ async function doSignUp(email,pass,name,role){
   }
   S.loading=true;showTransLoader();
   await loadProfile();
+  // Auto-register as client: create client record for all coaches if none exists
+  if(S.profile?.role==='client'){
+    const{data:existing}=await sb.from('clients').select('id').eq('email',S.user.email);
+    if(!existing||existing.length===0){
+      const nameParts=(name||'').split(' ');
+      const first=nameParts[0]||'Client';
+      const last=nameParts.slice(1).join(' ')||'';
+      // Find all coaches
+      const{data:coaches}=await sb.from('profiles').select('id').eq('role','coach');
+      if(coaches&&coaches.length>0){
+        for(const coach of coaches){
+          const colors=['#c8ff00','#3b82f6','#22c55e','#a855f7','#f59e0b','#06b6d4'];
+          await sb.from('clients').insert({coach_id:coach.id,user_id:S.user.id,first_name:first,last_name:last,email:S.user.email,color:colors[Math.floor(Math.random()*colors.length)],active:true});
+          // Notify coach
+          await sb.from('notifications').insert({user_id:coach.id,type:'client',title:'Nouveau client inscrit',body:`${first} ${last} (${S.user.email}) vient de créer un compte`});
+        }
+      }
+    }
+  }
   await loadClients();
   await loadSessions();
   await loadPrograms();
@@ -238,7 +256,7 @@ async function handleReg(){const n=document.getElementById('rN')?.value,e=docume
 function sideBar(isC){
 const p=S.pg,name=S.profile?.full_name||S.user?.email||'User';
 const cn=[{id:'dashboard',l:'Tableau de bord',i:ic.dash},{id:'clients',l:'Clients',i:ic.users},{id:'exercises',l:'Bibliothèque',i:ic.lib},{id:'programs',l:'Programmes',i:ic.prog},{id:'timer',l:'Timer WOD',i:ic.timer},{id:'performance',l:'Performances',i:ic.perf},{id:'calories',l:'Calories',i:ic.fire},{id:'nutrition',l:'Nutrition',i:ic.food},{id:'calendar',l:'Calendrier',i:ic.cal},{id:'chat',l:'Messages',i:ic.chat},{id:'survey',l:'Satisfaction',i:ic.star},{id:'qrcode',l:'QR Codes',i:ic.qr},{id:'stats',l:'Stats',i:ic.chart}];
-const cln=[{id:'cl-dash',l:'Mon espace',i:ic.dash},{id:'cl-cal',l:'Mes séances',i:ic.cal},{id:'cl-prog',l:'Programme',i:ic.prog},{id:'exercises',l:'Exercices',i:ic.lib},{id:'timer',l:'Timer WOD',i:ic.timer},{id:'cl-kcal',l:'Objectifs',i:ic.fire},{id:'cl-nutri',l:'Nutrition',i:ic.food},{id:'cl-chat',l:'Messages',i:ic.chat},{id:'cl-survey',l:'Évaluations',i:ic.star}];
+const cln=[{id:'cl-dash',l:'Mon espace',i:ic.dash},{id:'cl-cal',l:'Mes séances',i:ic.cal},{id:'cl-prog',l:'Programme',i:ic.prog},{id:'cl-perf',l:'Performances',i:ic.perf},{id:'exercises',l:'Exercices',i:ic.lib},{id:'timer',l:'Timer WOD',i:ic.timer},{id:'cl-kcal',l:'Objectifs',i:ic.fire},{id:'cl-nutri',l:'Nutrition',i:ic.food},{id:'cl-chat',l:'Messages',i:ic.chat},{id:'cl-survey',l:'Évaluations',i:ic.star}];
 const nav=isC?cn:cln;
 return `<div class="side-overlay ${S.sideOpen?'open':''}" onclick="S.sideOpen=false;R()"></div>
 <div class="side ${S.sideOpen?'open':''}"><div class="side-hd"><div class="logo">Forge</div><div class="logo-s">${isC?'Coach Platform':'Espace Client'}</div></div>
@@ -247,7 +265,7 @@ return `<div class="side-overlay ${S.sideOpen?'open':''}" onclick="S.sideOpen=fa
 </nav><div class="side-ft"><div class="ucard"><div class="av av-s" style="background:${isC?'var(--ac)':'var(--blu)'};color:#000">${name.split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2)}</div><div style="flex:1;min-width:0"><div style="font-size:.72rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</div><div style="font-size:.55rem;color:var(--t4)">${isC?'Coach':'Client'}</div></div></div></div></div>`;
 }
 function topBar(){
-const ts={dashboard:'Tableau de bord',clients:'Clients',exercises:'Bibliothèque',programs:'Programmes',timer:'Timer WOD',performance:'Performances',calories:'Calories',nutrition:'Nutrition',calendar:'Calendrier',chat:'Messages',survey:'Satisfaction',qrcode:'QR Codes',stats:'Stats',settings:'Paramètres','cl-dash':'Mon espace','cl-cal':'Mes séances','cl-prog':'Programme','cl-kcal':'Objectifs','cl-nutri':'Nutrition','cl-chat':'Messages','cl-survey':'Évaluations'};
+const ts={dashboard:'Tableau de bord',clients:'Clients',exercises:'Bibliothèque',programs:'Programmes',timer:'Timer WOD',performance:'Performances',calories:'Calories',nutrition:'Nutrition',calendar:'Calendrier',chat:'Messages',survey:'Satisfaction',qrcode:'QR Codes',stats:'Stats',settings:'Paramètres','cl-dash':'Mon espace','cl-cal':'Mes séances','cl-prog':'Programme','cl-perf':'Performances','cl-kcal':'Objectifs','cl-nutri':'Nutrition','cl-chat':'Messages','cl-survey':'Évaluations'};
 const unread=S.notifs.filter(n=>!n.read).length;
 return `<div class="topbar"><div style="display:flex;align-items:center;gap:8px"><button class="mob-toggle" onclick="S.sideOpen=!S.sideOpen;R()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg></button><span style="font-size:.8rem;font-weight:500">${ts[S.pg]||'Forge'}</span></div>
 <div style="position:relative"><button class="bic" onclick="S.notifOpen=!S.notifOpen;R()">${ic.bell}${unread?`<span style="position:absolute;top:3px;right:3px;width:8px;height:8px;background:var(--red);border-radius:50%;border:2px solid var(--bg)"></span>`:''}</button>
@@ -279,7 +297,7 @@ function pgRoute(isC){
 const p=S.pg;
 if(p==='exercises')return pgExercises();if(p==='timer')return pgTimer();if(p==='settings')return pgSettings();
 if(isC){switch(p){case'dashboard':return cDash();case'clients':return cClients();case'programs':return cPrograms();case'performance':return cPerf();case'calories':return cCalories();case'nutrition':return cNutrition();case'calendar':return cCalendar();case'chat':return cChat();case'survey':return cSurvey();case'qrcode':return cQR();case'stats':return cStats();default:return cDash();}}
-else{switch(p){case'cl-dash':return clDash();case'cl-cal':return clCal();case'cl-prog':return clProg();case'cl-kcal':return clKcal();case'cl-nutri':return cNutrition();case'cl-chat':return clChat();case'cl-survey':return clSurvey();default:return clDash();}}
+else{switch(p){case'cl-dash':return clDash();case'cl-cal':return clCal();case'cl-prog':return clProg();case'cl-perf':return clPerf();case'cl-kcal':return clKcal();case'cl-nutri':return cNutrition();case'cl-chat':return clChat();case'cl-survey':return clSurvey();default:return clDash();}}
 }
 
 // ===== COACH: DASHBOARD =====
@@ -506,31 +524,36 @@ S.modal={title:'Nouvelle performance',content:`
 
 // ===== DEFAULT FOODS DATABASE =====
 const DEFAULT_FOODS=[
-{name:'Blanc de poulet (100g)',calories:165,protein:31,carbs:0,fat:3.6},
-{name:'Saumon (100g)',calories:208,protein:20,carbs:0,fat:13},
-{name:'Steak haché 5% (100g)',calories:137,protein:26,carbs:0,fat:5},
-{name:'Thon en boîte (100g)',calories:116,protein:25.5,carbs:0,fat:1},
-{name:'Œuf entier',calories:72,protein:6.3,carbs:0.4,fat:4.8},
+{name:'Blanc de poulet cru (100g)',calories:120,protein:22.5,carbs:0,fat:2.6},
+{name:'Saumon cru (100g)',calories:208,protein:20,carbs:0,fat:13},
+{name:'Steak haché 5% cru (100g)',calories:137,protein:20,carbs:0,fat:5},
+{name:'Thon cru (100g)',calories:130,protein:29,carbs:0,fat:1},
+{name:'Cabillaud cru (100g)',calories:82,protein:18,carbs:0,fat:0.7},
+{name:'Crevettes crues (100g)',calories:85,protein:18,carbs:0,fat:1.2},
+{name:'Dinde crue (100g)',calories:104,protein:24,carbs:0,fat:0.7},
+{name:'Œuf entier (60g)',calories:90,protein:7.5,carbs:0.5,fat:6.3},
 {name:'Whey protéine (30g)',calories:120,protein:24,carbs:3,fat:1.5},
 {name:'Fromage blanc 0% (100g)',calories:45,protein:7,carbs:4,fat:0.2},
-{name:'Yaourt grec 0% (150g)',calories:87,protein:15,carbs:5,fat:0},
-{name:'Riz blanc cuit (100g)',calories:130,protein:2.7,carbs:28,fat:0.3},
-{name:'Pâtes cuites (100g)',calories:131,protein:5,carbs:25,fat:1.1},
+{name:'Yaourt grec 0% (100g)',calories:58,protein:10,carbs:3.5,fat:0},
+{name:'Riz basmati cru (100g)',calories:350,protein:7.5,carbs:78,fat:0.6},
+{name:'Pâtes crues (100g)',calories:350,protein:12,carbs:72,fat:1.5},
 {name:'Flocons d\'avoine (100g)',calories:389,protein:16.9,carbs:66,fat:6.9},
-{name:'Patate douce (100g)',calories:86,protein:1.6,carbs:20,fat:0.1},
-{name:'Quinoa cuit (100g)',calories:120,protein:4.4,carbs:21,fat:1.9},
-{name:'Lentilles cuites (100g)',calories:116,protein:9,carbs:20,fat:0.4},
-{name:'Pain complet (1 tranche)',calories:80,protein:3.5,carbs:14,fat:1},
-{name:'Banane',calories:89,protein:1.1,carbs:23,fat:0.3},
-{name:'Pomme',calories:52,protein:0.3,carbs:14,fat:0.2},
-{name:'Brocoli (100g)',calories:34,protein:2.8,carbs:7,fat:0.4},
-{name:'Avocat (demi)',calories:120,protein:1.5,carbs:6,fat:11},
-{name:'Amandes (30g)',calories:170,protein:6,carbs:6,fat:15},
-{name:'Beurre cacahuète (1 c.s.)',calories:94,protein:4,carbs:3,fat:8},
-{name:'Huile d\'olive (1 c.s.)',calories:119,protein:0,carbs:0,fat:13.5},
-{name:'Miel (1 c.s.)',calories:64,protein:0.1,carbs:17,fat:0},
+{name:'Patate douce crue (100g)',calories:86,protein:1.6,carbs:20,fat:0.1},
+{name:'Quinoa cru (100g)',calories:368,protein:14,carbs:64,fat:6},
+{name:'Lentilles crues (100g)',calories:353,protein:25,carbs:60,fat:1},
+{name:'Pain complet (1 tranche 30g)',calories:72,protein:3,carbs:12,fat:1.2},
+{name:'Banane (120g)',calories:107,protein:1.3,carbs:27,fat:0.4},
+{name:'Pomme (150g)',calories:78,protein:0.5,carbs:21,fat:0.3},
+{name:'Brocoli cru (100g)',calories:34,protein:2.8,carbs:7,fat:0.4},
+{name:'Avocat (100g)',calories:160,protein:2,carbs:8.5,fat:14.7},
+{name:'Amandes (30g)',calories:183,protein:6.3,carbs:2,fat:16},
+{name:'Beurre cacahuète (15g / 1cs)',calories:94,protein:4,carbs:2,fat:8},
+{name:'Huile d\'olive (10ml / 1cs)',calories:90,protein:0,carbs:0,fat:10},
+{name:'Miel (15g / 1cs)',calories:46,protein:0,carbs:12,fat:0},
 {name:'Lait demi-écrémé (200ml)',calories:92,protein:6.4,carbs:9.6,fat:3.2},
-{name:'Crevettes (100g)',calories:85,protein:18,carbs:0,fat:1.2},
+{name:'Beurre (10g)',calories:75,protein:0.1,carbs:0,fat:8.3},
+{name:'Parmesan (30g)',calories:120,protein:10.5,carbs:0,fat:8.7},
+{name:'Haricots rouges crus (100g)',calories:333,protein:22,carbs:60,fat:0.8},
 ];
 
 // ===== COACH: NUTRITION =====
@@ -615,11 +638,52 @@ return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-st
 <div class="card"><div class="card-h"><h3>Complétion</h3></div><div class="card-b" style="text-align:center"><div style="font-family:var(--fs);font-style:italic;font-size:2.5rem;color:var(--ac)">${S.sessions.length?Math.round(done/S.sessions.length*100):0}%</div><div class="lb" style="margin-top:3px">séances terminées</div></div></div></div>`;
 }
 function cCalories(){
-return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Calculateur métabolique</h2><p style="color:var(--t3);font-size:.8rem">Mifflin-St Jeor · ⚠️ Estimation uniquement</p></div>
-<div class="card"><div class="card-b"><p style="color:var(--t2);font-size:.82rem">Sélectionnez un client pour calculer ses besoins caloriques personnalisés. Les données sont tirées de sa fiche (poids, taille, âge, activité, objectif).</p>
-<div class="fg" style="margin-top:14px"><label class="lb">Client</label><select id="calCl" onchange="calcKcal()"><option value="">Choisir...</option>${S.clients.map(c=>`<option value="${c.id}">${c.first_name} ${c.last_name}</option>`).join('')}</select></div>
-<div id="calResult"></div></div></div>`;
+return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Calculateur calorique</h2><p style="color:var(--t3);font-size:.8rem">Mifflin-St Jeor · Valeurs indicatives</p></div>
+<div class="card"><div class="card-b">
+<div class="fg"><label class="lb">Client</label><select id="calCl" onchange="fillCalForm()"><option value="">Choisir un client...</option>${S.clients.map(c=>`<option value="${c.id}">${c.first_name} ${c.last_name}</option>`).join('')}</select></div>
+<div class="g4"><div class="fg"><label class="lb">Âge</label><input id="calAge" type="number" placeholder="25"></div><div class="fg"><label class="lb">Poids (kg)</label><input id="calW" type="number" placeholder="75"></div><div class="fg"><label class="lb">Taille (cm)</label><input id="calH" type="number" placeholder="178"></div><div class="fg"><label class="lb">Sexe</label><select id="calG"><option value="male">Homme</option><option value="female">Femme</option></select></div></div>
+<div class="g2"><div class="fg"><label class="lb">Niveau d'activité</label><select id="calAc"><option value="sedentary">Sédentaire (bureau)</option><option value="light">Peu actif (1-2x/sem)</option><option value="moderate" selected>Modéré (3-5x/sem)</option><option value="active">Actif (6-7x/sem)</option><option value="extreme">Très actif (2x/jour)</option></select></div><div class="fg"><label class="lb">Objectif</label><select id="calGo"><option value="maintain">Maintien</option><option value="muscle">Prise de masse (+350)</option><option value="lose">Perte de poids (-500)</option><option value="tone">Tonification (-200)</option><option value="endurance">Endurance (+200)</option></select></div></div>
+<button class="b bp" onclick="calcKcal()" style="width:100%;justify-content:center">Calculer mes besoins</button>
+</div></div><div id="calResult"></div>`;
 }
+function fillCalForm(){
+const id=+document.getElementById('calCl')?.value;if(!id)return;
+const c=S.clients.find(x=>x.id===id);if(!c)return;
+if(c.age)document.getElementById('calAge').value=c.age;
+if(c.weight)document.getElementById('calW').value=c.weight;
+if(c.height)document.getElementById('calH').value=c.height;
+if(c.gender)document.getElementById('calG').value=c.gender;
+if(c.activity)document.getElementById('calAc').value=c.activity;
+if(c.goal==='Prise de masse')document.getElementById('calGo').value='muscle';
+else if(c.goal==='Perte de poids')document.getElementById('calGo').value='lose';
+else if(c.goal==='Performance')document.getElementById('calGo').value='endurance';
+}
+
+// Shared calculator for coach + client
+function kcalCalc(isClient){
+return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">${isClient?'Mes objectifs':'Calculateur calorique'}</h2><p style="color:var(--t3);font-size:.8rem">Mifflin-St Jeor · Valeurs indicatives</p></div>
+<div class="card"><div class="card-b">
+<div class="g4"><div class="fg"><label class="lb">Âge</label><input id="calAge" type="number" value="${isClient&&S.clients[0]?S.clients[0].age||25:''}" placeholder="25"></div><div class="fg"><label class="lb">Poids (kg)</label><input id="calW" type="number" value="${isClient&&S.clients[0]?S.clients[0].weight||70:''}" placeholder="75"></div><div class="fg"><label class="lb">Taille (cm)</label><input id="calH" type="number" value="${isClient&&S.clients[0]?S.clients[0].height||175:''}" placeholder="178"></div><div class="fg"><label class="lb">Sexe</label><select id="calG"><option value="male" ${isClient&&S.clients[0]?.gender==='male'?'selected':''}>Homme</option><option value="female" ${isClient&&S.clients[0]?.gender==='female'?'selected':''}>Femme</option></select></div></div>
+<div class="g2"><div class="fg"><label class="lb">Niveau d'activité</label><select id="calAc"><option value="sedentary">Sédentaire</option><option value="light">Peu actif (1-2x/sem)</option><option value="moderate" ${isClient&&S.clients[0]?.activity==='moderate'?'selected':''}>Modéré (3-5x/sem)</option><option value="active" ${isClient&&S.clients[0]?.activity==='active'?'selected':''}>Actif (6-7x/sem)</option><option value="extreme" ${isClient&&S.clients[0]?.activity==='extreme'?'selected':''}>Très actif</option></select></div><div class="fg"><label class="lb">Objectif</label><select id="calGo"><option value="maintain">Maintien</option><option value="muscle">Prise de masse</option><option value="lose">Perte de poids</option><option value="tone">Tonification</option><option value="endurance">Endurance</option></select></div></div>
+<button class="b bp" onclick="calcKcal()" style="width:100%;justify-content:center">Calculer</button>
+</div></div><div id="calResult"></div>`;
+}
+function clKcal(){return kcalCalc(true);}
+
+// Client performances page
+function clPerf(){
+const mc=S.clients[0];if(!mc)return '<div style="padding:30px;text-align:center;color:var(--t3)">Pas encore lié à un coach.</div>';
+return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Mes performances</h2></div><div id="clPerfData"><div class="loading" style="min-height:auto;padding:20px">Chargement...</div></div>`;
+}
+async function showClPerf(){
+const mc=S.clients[0];if(!mc)return;
+const data=await loadPerfs(mc.id);
+const el=document.getElementById('clPerfData');if(!el)return;
+if(!data.length){el.innerHTML='<div class="card"><div class="card-b" style="text-align:center;color:var(--t4);padding:24px">Aucune performance enregistrée par votre coach</div></div>';return;}
+const exs=[...new Set(data.map(p=>p.exercise))];
+el.innerHTML=exs.map(ex=>{const d=data.filter(p=>p.exercise===ex);const mx=Math.max(...d.map(x=>x.weight||1));return `<div class="card"><div class="card-h"><h3>${ex}</h3><span class="badge ba">${d[d.length-1].weight}kg × ${d[d.length-1].reps}</span></div><div class="card-b"><div class="perf-bars">${d.map((x,i)=>`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;height:100px;justify-content:flex-end"><span style="font-size:.55rem;font-family:var(--fm);color:var(--ac)">${x.weight}kg</span><div style="width:100%;max-width:24px;height:${x.weight/mx*100}%;background:var(--ac);border-radius:3px 3px 0 0;opacity:${.4+i/d.length*.6}"></div><span style="font-size:.5rem;color:var(--t4)">${x.date?.slice(5)||''}</span></div>`).join('')}</div><div style="display:flex;justify-content:space-between;font-size:.7rem;color:var(--t3);margin-top:6px"><span>${d[0].weight}→${d[d.length-1].weight}kg</span><span style="color:var(--grn)">+${(d[d.length-1].weight-d[0].weight).toFixed(1)}kg</span></div></div></div>`;}).join('');
+}
+setTimeout(()=>{if(S.pg==='cl-perf')showClPerf()},50);
 
 // ===== CLIENT PAGES =====
 function clDash(){
@@ -632,24 +696,43 @@ ${c.medical&&c.medical!=='RAS'?`<div style="background:rgba(245,158,11,.05);bord
 }
 function clCal(){const se=S.sessions;return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Mes séances</h2></div><div class="g2">${[['Terminées','done','bgr'],['À venir','upcoming','ba']].map(([t,st,bc])=>`<div class="card"><div class="card-h"><h3>${t}</h3><span class="badge ${bc}">${se.filter(s=>s.status===st).length}</span></div><div class="card-b">${se.filter(s=>s.status===st).map(s=>`<div class="sess ${st==='done'?'dn':'up'}"><strong>${s.type||''}</strong> <span style="font-family:var(--fm);font-size:.7rem">${s.date} ${s.time||''}</span></div>`).join('')||'<div style="color:var(--t4);text-align:center;padding:10px">—</div>'}</div></div>`).join('')}</div>`;}
 function clProg(){return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Mon programme</h2></div>${S.programs.length?S.programs.map(p=>`<div class="card"><div class="card-b"><strong>${p.name}</strong><p style="color:var(--t3);font-size:.8rem;margin-top:3px">${p.description||''}</p></div></div>`).join(''):'<div style="color:var(--t4);text-align:center;padding:30px">Aucun programme assigné</div>'}`;}
-function clKcal(){const c=S.clients[0];if(!c)return '';const bmr=c.gender==='male'?10*(c.weight||70)+6.25*(c.height||175)-5*(c.age||30)+5:10*(c.weight||60)+6.25*(c.height||165)-5*(c.age||30)-161;const mult={sedentary:1.2,light:1.375,moderate:1.55,active:1.725,extreme:1.9};let tdee=Math.round(bmr*(mult[c.activity]||1.55));let t=tdee;if(c.goal==='Perte de poids')t=tdee-500;else if(c.goal==='Prise de masse')t=tdee+350;t=Math.max(t,1200);return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Mes objectifs</h2><p style="color:var(--t3);font-size:.78rem">⚠️ Estimation Mifflin-St Jeor</p></div><div style="background:linear-gradient(135deg,var(--s),var(--bg3));border:1px solid rgba(200,255,0,.08);border-radius:18px;padding:24px;text-align:center;max-width:350px"><div style="font-family:var(--fs);font-style:italic;font-size:2.8rem;color:var(--ac);line-height:1">${t}</div><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--t3);margin-top:3px">Kcal/jour · ${c.goal||'Maintien'}</div></div>`;}
 function clSurvey(){return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Évaluations</h2></div>${S.surveys.map(s=>`<div class="card"><div class="card-b"><span style="color:var(--ac)">${'★'.repeat(s.global_rating||0)}${'☆'.repeat(5-(s.global_rating||0))}</span> <span style="font-size:.7rem;color:var(--t4)">${s.date||''}</span>${s.comments?`<p style="font-size:.8rem;color:var(--t2);margin-top:3px">"${s.comments}"</p>`:''}</div></div>`).join('')||'<div style="color:var(--t4);text-align:center;padding:30px">Aucune</div>'}`;}
 
-// ===== CALORIES CALCULATOR =====
+// ===== CALORIES CALCULATOR (shared) =====
 function calcKcal(){
-const id=+document.getElementById('calCl')?.value;if(!id){document.getElementById('calResult').innerHTML='';return;}
-const c=S.clients.find(x=>x.id===id);if(!c)return;
-const bmr=c.gender==='male'?10*(c.weight||70)+6.25*(c.height||175)-5*(c.age||30)+5:10*(c.weight||60)+6.25*(c.height||165)-5*(c.age||30)-161;
+const age=+document.getElementById('calAge')?.value||25;
+const w=+document.getElementById('calW')?.value||70;
+const h=+document.getElementById('calH')?.value||175;
+const g=document.getElementById('calG')?.value||'male';
+const ac=document.getElementById('calAc')?.value||'moderate';
+const go=document.getElementById('calGo')?.value||'maintain';
+if(!w||!h){toast('Remplissez poids et taille','err');return;}
+const bmr=g==='male'?10*w+6.25*h-5*age+5:10*w+6.25*h-5*age-161;
 const mult={sedentary:1.2,light:1.375,moderate:1.55,active:1.725,extreme:1.9};
-const tdee=Math.round(bmr*(mult[c.activity]||1.55));
-let t=tdee,gl=c.goal||'Maintien',adj=0,pm=1.8;
-if(gl==='Prise de masse'){adj=350;pm=2.2;}else if(gl==='Perte de poids'){adj=-500;pm=2.4;}else if(gl==='Performance'){adj=200;pm=2;}
-t=Math.max(tdee+adj,1200);
-const prot=Math.round((c.weight||70)*pm),fat=Math.round(t*.25/9),carbs=Math.round((t-prot*4-fat*9)/4);
+const tdee=Math.round(bmr*(mult[ac]||1.55));
+let adj=0,pm=1.8,gl='Maintien';
+if(go==='muscle'){adj=350;pm=2.2;gl='Prise de masse';}
+else if(go==='lose'){adj=-500;pm=2.4;gl='Perte de poids';}
+else if(go==='tone'){adj=-200;pm=2;gl='Tonification';}
+else if(go==='endurance'){adj=200;pm=1.6;gl='Endurance';}
+const t=Math.max(tdee+adj,1200);
+const prot=Math.round(w*pm),fat=Math.round(t*.25/9),carbs=Math.round((t-prot*4-fat*9)/4);
+const pp=Math.round(prot*4/t*100),fp=Math.round(fat*9/t*100),cp=100-pp-fp;
+const imc=(w/((h/100)**2)).toFixed(1);
 document.getElementById('calResult').innerHTML=`
-<div style="margin-top:16px;background:linear-gradient(135deg,var(--s),var(--bg3));border:1px solid rgba(200,255,0,.08);border-radius:18px;padding:24px;text-align:center"><div style="font-family:var(--fs);font-style:italic;font-size:3rem;color:var(--ac);line-height:1">${t}</div><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--t3);margin-top:4px">Kcal/jour · ${gl} (${adj>0?'+':''}${adj})</div></div>
-<div class="g3" style="margin-top:14px;text-align:center">${[[prot,'var(--ac)','Prot ('+pm+'g/kg)'],[carbs,'var(--org)','Glucides'],[fat,'var(--red)','Lipides']].map(([v,col,l])=>`<div style="background:var(--bg3);padding:10px;border-radius:var(--r2)"><div style="font-family:var(--fs);font-style:italic;font-size:1.3rem;color:${col}">${v}g</div><div class="lb" style="margin:2px 0 0">${l}</div></div>`).join('')}</div>
-<div style="margin-top:12px;font-size:.75rem;color:var(--t3)">BMR: ${Math.round(bmr)} kcal · TDEE: ${tdee} kcal · IMC: ${(c.weight/((c.height/100)**2)).toFixed(1)}</div>`;
+<div class="card" style="margin-top:14px"><div class="card-b">
+<div style="text-align:center;margin-bottom:16px"><div style="font-size:.55rem;font-weight:600;text-transform:uppercase;letter-spacing:2px;color:var(--t4);margin-bottom:4px">Vos besoins journaliers</div><div style="font-family:var(--fs);font-size:3rem;color:var(--ac);line-height:1;font-weight:700">${t}</div><div style="font-size:.7rem;color:var(--t3);margin-top:2px">kcal/jour · ${gl}</div></div>
+<div class="g4" style="text-align:center;margin-bottom:16px">
+<div style="background:var(--bg3);padding:12px 8px;border-radius:var(--r2)"><div style="font-family:var(--fs);font-size:1.4rem;color:var(--ac);font-weight:700">${prot}g</div><div style="font-size:.5rem;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;color:var(--t4);margin-top:2px">Protéines</div><div style="font-size:.6rem;color:var(--t3)">${pm}g/kg</div></div>
+<div style="background:var(--bg3);padding:12px 8px;border-radius:var(--r2)"><div style="font-family:var(--fs);font-size:1.4rem;color:var(--org);font-weight:700">${carbs}g</div><div style="font-size:.5rem;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;color:var(--t4);margin-top:2px">Glucides</div><div style="font-size:.6rem;color:var(--t3)">${cp}%</div></div>
+<div style="background:var(--bg3);padding:12px 8px;border-radius:var(--r2)"><div style="font-family:var(--fs);font-size:1.4rem;color:var(--red);font-weight:700">${fat}g</div><div style="font-size:.5rem;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;color:var(--t4);margin-top:2px">Lipides</div><div style="font-size:.6rem;color:var(--t3)">${fp}%</div></div>
+<div style="background:var(--bg3);padding:12px 8px;border-radius:var(--r2)"><div style="font-family:var(--fs);font-size:1.4rem;color:var(--blu);font-weight:700">${imc}</div><div style="font-size:.5rem;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;color:var(--t4);margin-top:2px">IMC</div></div>
+</div>
+<div style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;font-size:.7rem;margin-bottom:3px"><span>Répartition calorique</span></div>
+<div style="display:flex;height:8px;border-radius:4px;overflow:hidden"><div style="width:${pp}%;background:var(--ac)"></div><div style="width:${cp}%;background:var(--org)"></div><div style="width:${fp}%;background:var(--red)"></div></div>
+<div style="display:flex;justify-content:space-between;margin-top:4px;font-size:.6rem;color:var(--t4)"><span style="color:var(--ac)">Prot ${pp}%</span><span style="color:var(--org)">Gluc ${cp}%</span><span style="color:var(--red)">Lip ${fp}%</span></div></div>
+<div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--t3);padding-top:10px;border-top:var(--border)"><span>BMR: ${Math.round(bmr)} kcal</span><span>TDEE: ${tdee} kcal</span><span>Ajust: ${adj>0?'+':''}${adj}</span></div>
+</div></div>`;
 }
 
 // ===== EXERCISES =====
