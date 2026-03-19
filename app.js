@@ -38,7 +38,7 @@ play:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></sv
 };
 
 // ===== AUTH =====
-async function doSignUp(email,pass,name,role){
+async function doSignUp(email,pass,name,role,firstName,lastName,extra){
   const{data,error}=await sb.auth.signUp({email,password:pass,options:{data:{full_name:name,role}}});
   if(error){toast(error.message,'err');S.loading=false;R();return;}
   if(!data.session){
@@ -50,34 +50,27 @@ async function doSignUp(email,pass,name,role){
   }
   S.loading=true;showTransLoader();
   await loadProfile();
-  // Auto-register as client: create client record for all coaches if none exists
+  // Auto-create client record linked to THE coach
   if(S.profile?.role==='client'){
-    const{data:existing}=await sb.from('clients').select('id').eq('email',S.user.email);
+    const{data:existing}=await sb.from('clients').select('id').eq('user_id',S.user.id);
     if(!existing||existing.length===0){
-      const nameParts=(name||'').split(' ');
-      const first=nameParts[0]||'Client';
-      const last=nameParts.slice(1).join(' ')||'';
-      // Find all coaches
-      const{data:coaches}=await sb.from('profiles').select('id').eq('role','coach');
-      if(coaches&&coaches.length>0){
-        for(const coach of coaches){
-          const colors=['#c8ff00','#3b82f6','#22c55e','#a855f7','#f59e0b','#06b6d4'];
-          await sb.from('clients').insert({coach_id:coach.id,user_id:S.user.id,first_name:first,last_name:last,email:S.user.email,color:colors[Math.floor(Math.random()*colors.length)],active:true});
-          // Notify coach
-          await sb.from('notifications').insert({user_id:coach.id,type:'client',title:'Nouveau client inscrit',body:`${first} ${last} (${S.user.email}) vient de créer un compte`});
-        }
+      const fn=firstName||name?.split(' ')[0]||'Client';
+      const ln=lastName||name?.split(' ').slice(1).join(' ')||'';
+      const{data:coach}=await sb.from('profiles').select('id').eq('role','coach').limit(1).single();
+      if(coach){
+        const colors=['#c8ff00','#3b82f6','#22c55e','#a855f7','#f59e0b','#06b6d4'];
+        await sb.from('clients').insert({
+          coach_id:coach.id,user_id:S.user.id,first_name:fn,last_name:ln,email:S.user.email,
+          age:extra?.age||null,weight:extra?.weight||null,height:extra?.height||null,
+          gender:extra?.gender||'male',goal:extra?.goal||null,level:extra?.level||null,
+          activity:'moderate',color:colors[Math.floor(Math.random()*colors.length)],active:true
+        });
+        await sb.from('notifications').insert({user_id:coach.id,type:'client',title:'Nouveau client',body:`${fn} ${ln} vient de s'inscrire`});
       }
     }
   }
-  await loadClients();
-  await loadSessions();
-  await loadPrograms();
-  await loadSurveys();
-  await loadFoods();
-  await loadNotifs();
-  subRealtime();
-  S.loading=false;hideTransLoader();R();
-  toast('Bienvenue !');
+  await loadClients();await loadSessions();await loadPrograms();await loadSurveys();await loadFoods();await loadNotifs();
+  subRealtime();S.loading=false;hideTransLoader();R();toast('Bienvenue !');
 }
 async function doSignIn(email,pass){
   const{data,error}=await sb.auth.signInWithPassword({email,password:pass});
@@ -233,8 +226,16 @@ function showAuth(mode){
   if(!title||!form)return;
   if(mode==='register'){
     title.textContent='Créer un compte';
-    sub.textContent='Inscription gratuite · 30 secondes';
-    form.innerHTML=`<div class="fg"><label class="lb">Nom complet</label><input id="rN" placeholder="Jean Dupont"></div><div class="fg"><label class="lb">Email</label><input id="rE" type="email" placeholder="email@exemple.com"></div><div class="fg"><label class="lb">Mot de passe</label><input id="rP" type="password" placeholder="Min. 6 caractères"></div><button class="b bp" style="width:100%;justify-content:center;padding:12px" onclick="handleReg()">Créer mon compte</button><p style="text-align:center;margin-top:16px;font-size:.72rem;color:var(--t4)">Déjà un compte ? <a onclick="showAuth('login')">Se connecter</a></p>`;
+    sub.textContent='Remplissez votre profil';
+    form.innerHTML=`
+<div class="g2"><div class="fg"><label class="lb">Prénom</label><input id="rF" placeholder="Jean"></div><div class="fg"><label class="lb">Nom</label><input id="rL" placeholder="Dupont"></div></div>
+<div class="fg"><label class="lb">Email</label><input id="rE" type="email" placeholder="email@exemple.com"></div>
+<div class="fg"><label class="lb">Mot de passe (min 6)</label><input id="rP" type="password" placeholder="••••••••"></div>
+<div class="g3"><div class="fg"><label class="lb">Âge</label><input id="rAge" type="number" placeholder="25"></div><div class="fg"><label class="lb">Poids (kg)</label><input id="rW" type="number" placeholder="75"></div><div class="fg"><label class="lb">Taille (cm)</label><input id="rH" type="number" placeholder="178"></div></div>
+<div class="g2"><div class="fg"><label class="lb">Sexe</label><select id="rGn"><option value="male">Homme</option><option value="female">Femme</option></select></div><div class="fg"><label class="lb">Objectif</label><select id="rGo"><option>Prise de masse</option><option>Perte de poids</option><option>Remise en forme</option><option>Performance</option></select></div></div>
+<div class="fg"><label class="lb">Niveau</label><select id="rLv"><option>Débutant</option><option>Intermédiaire</option><option>Avancé</option></select></div>
+<button class="b bp" style="width:100%;justify-content:center;padding:12px" onclick="handleReg()">Créer mon compte</button>
+<p style="text-align:center;margin-top:14px;font-size:.72rem;color:var(--t4)">Déjà un compte ? <a onclick="showAuth('login')">Se connecter</a></p>`;
   }else{
     title.textContent='Connexion';
     sub.textContent='Accédez à votre espace';
@@ -250,7 +251,13 @@ let authMode='login',authRole='coach';
 
 
 async function handleLogin(){const e=document.getElementById('lE')?.value,p=document.getElementById('lP')?.value;if(!e||!p){toast('Champs requis','err');return;}S.loading=true;R();await doSignIn(e,p);}
-async function handleReg(){const n=document.getElementById('rN')?.value,e=document.getElementById('rE')?.value,p=document.getElementById('rP')?.value;if(!n||!e||!p){toast('Tous les champs requis','err');return;}if(p.length<6){toast('Mot de passe trop court','err');return;}await doSignUp(e,p,n,'client');}
+async function handleReg(){
+const f=document.getElementById('rF')?.value,l=document.getElementById('rL')?.value,e=document.getElementById('rE')?.value,p=document.getElementById('rP')?.value;
+if(!f||!e||!p){toast('Prénom, email et mot de passe requis','err');return;}
+if(p.length<6){toast('Mot de passe trop court','err');return;}
+const extra={age:+document.getElementById('rAge')?.value||null,weight:+document.getElementById('rW')?.value||null,height:+document.getElementById('rH')?.value||null,gender:document.getElementById('rGn')?.value||'male',goal:document.getElementById('rGo')?.value||'Remise en forme',level:document.getElementById('rLv')?.value||'Débutant'};
+await doSignUp(e,p,f+' '+(l||''),'client',f,l||'',extra);
+}
 
 // ===== SIDEBAR =====
 function sideBar(isC){
