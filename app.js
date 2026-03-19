@@ -294,8 +294,13 @@ async function handleNotif(id,type){
   await sb.from('notifications').update({read:true}).eq('id',id);
   const n=S.notifs.find(x=>x.id===id);if(n)n.read=true;
   S.notifOpen=false;
-  if(type==='survey'){S.pg=S.profile?.role==='coach'?'survey':'cl-survey';}
+  if(type==='survey'&&S.profile?.role==='client'){
+    S.pg='cl-survey';R();
+    setTimeout(()=>openClientSurvey(n?.client_id),100);return;
+  }
+  if(type==='survey'){S.pg='survey';}
   else if(type==='session'){S.pg=S.profile?.role==='coach'?'calendar':'cl-cal';}
+  else if(type==='client'){S.pg='clients';}
   R();
 }
 
@@ -322,24 +327,13 @@ return `<div style="display:flex;justify-content:space-between;align-items:cente
 async function complSess(id){
   const sess=S.sessions.find(s=>s.id===id);
   await sb.from('sessions').update({status:'done'}).eq('id',id);
-  // Find client and send notification
   if(sess){
     const c=S.clients.find(x=>x.id===sess.client_id);
     if(c&&c.user_id){
       await sb.from('notifications').insert({user_id:c.user_id,client_id:c.id,type:'survey',title:'Séance terminée !',body:`${sess.type||'Séance'} du ${sess.date} — Donnez votre avis`});
     }
-    // Auto-open survey creation for coach
-    S.modal={title:'Questionnaire post-séance',w:true,content:`
-    <div style="background:var(--acg);border:1px solid rgba(200,255,0,.08);border-radius:var(--r2);padding:12px;margin-bottom:14px;font-size:.82rem;color:var(--ac)">📋 Séance "${sess.type||''}" validée pour ${c?c.first_name+' '+c.last_name:''}. Remplir le questionnaire ?</div>
-    <div class="g3"><div class="fg"><label class="lb">Note globale (1-5)</label><input id="svG" type="number" min="1" max="5" value="5"></div><div class="fg"><label class="lb">Note coach (1-5)</label><input id="svC" type="number" min="1" max="5" value="5"></div><div class="fg"><label class="lb">Note programme (1-5)</label><input id="svP" type="number" min="1" max="5" value="4"></div></div>
-    <div class="g2"><div class="fg"><label class="lb">Effort (1-10)</label><input id="svE" type="number" min="1" max="10" value="7"></div><div class="fg"><label class="lb">Objectifs</label><select id="svGoal"><option>En cours</option><option>Atteints</option><option>Non atteints</option></select></div></div>
-    <div class="fg"><label class="lb">Commentaires</label><textarea id="svCom"></textarea></div>
-    `,onSave:async()=>{
-      await sb.from('surveys').insert({coach_id:S.user.id,client_id:sess.client_id,global_rating:+document.getElementById('svG')?.value,coach_rating:+document.getElementById('svC')?.value,program_rating:+document.getElementById('svP')?.value,effort:+document.getElementById('svE')?.value,comments:document.getElementById('svCom')?.value,goals:document.getElementById('svGoal')?.value});
-      S.modal=null;await loadSurveys();toast('Questionnaire enregistré !');R();
-    },ns:false};
   }
-  await loadSessions();toast('Séance validée !');R();
+  await loadSessions();toast('Séance validée ! Notification envoyée au client.');R();
 }
 
 // ===== COACH: CLIENTS =====
@@ -703,7 +697,27 @@ ${c.medical&&c.medical!=='RAS'?`<div style="background:rgba(245,158,11,.05);bord
 }
 function clCal(){const se=S.sessions;return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Mes séances</h2></div><div class="g2">${[['Terminées','done','bgr'],['À venir','upcoming','ba']].map(([t,st,bc])=>`<div class="card"><div class="card-h"><h3>${t}</h3><span class="badge ${bc}">${se.filter(s=>s.status===st).length}</span></div><div class="card-b">${se.filter(s=>s.status===st).map(s=>`<div class="sess ${st==='done'?'dn':'up'}"><strong>${s.type||''}</strong> <span style="font-family:var(--fm);font-size:.7rem">${s.date} ${s.time||''}</span></div>`).join('')||'<div style="color:var(--t4);text-align:center;padding:10px">—</div>'}</div></div>`).join('')}</div>`;}
 function clProg(){return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Mon programme</h2></div>${S.programs.length?S.programs.map(p=>`<div class="card"><div class="card-b"><strong>${p.name}</strong><p style="color:var(--t3);font-size:.8rem;margin-top:3px">${p.description||''}</p></div></div>`).join(''):'<div style="color:var(--t4);text-align:center;padding:30px">Aucun programme assigné</div>'}`;}
-function clSurvey(){return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Évaluations</h2></div>${S.surveys.map(s=>`<div class="card"><div class="card-b"><span style="color:var(--ac)">${'★'.repeat(s.global_rating||0)}${'☆'.repeat(5-(s.global_rating||0))}</span> <span style="font-size:.7rem;color:var(--t4)">${s.date||''}</span>${s.comments?`<p style="font-size:.8rem;color:var(--t2);margin-top:3px">"${s.comments}"</p>`:''}</div></div>`).join('')||'<div style="color:var(--t4);text-align:center;padding:30px">Aucune</div>'}`;}
+function clSurvey(){
+const mc=S.clients[0];
+return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Mes évaluations</h2>${mc?`<button class="b bp" onclick="openClientSurvey(${mc.id})">${ic.plus} Donner mon avis</button>`:''}</div>
+${S.surveys.map(s=>`<div class="card"><div class="card-b"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><span style="color:var(--ac)">${'★'.repeat(s.global_rating||0)}${'☆'.repeat(5-(s.global_rating||0))}</span><span style="font-size:.68rem;color:var(--t4)">${s.date||''}</span></div>
+<div style="display:flex;gap:4px;margin-bottom:4px"><span class="badge bo">Effort ${s.effort||'—'}/10</span><span class="badge bo">Coach ${s.coach_rating||'—'}/5</span><span class="badge bo">Programme ${s.program_rating||'—'}/5</span></div>
+${s.comments?`<p style="font-size:.8rem;color:var(--t2);margin-top:4px">"${s.comments}"</p>`:''}</div></div>`).join('')||'<div style="color:var(--t4);text-align:center;padding:30px">Aucune évaluation. Votre coach vous enverra un questionnaire après chaque séance.</div>'}`;
+}
+function openClientSurvey(clientId){
+const mc=S.clients[0];if(!mc)return;
+S.modal={title:'Donner mon avis',w:true,content:`
+<div style="background:var(--acg);border:1px solid var(--acb);border-radius:var(--r2);padding:12px;margin-bottom:14px;font-size:.82rem;color:var(--ac)">📋 Comment s'est passée votre dernière séance ?</div>
+<div class="g3"><div class="fg"><label class="lb">Note globale (1-5)</label><input id="svG" type="number" min="1" max="5" value="4"></div><div class="fg"><label class="lb">Note coach (1-5)</label><input id="svC" type="number" min="1" max="5" value="5"></div><div class="fg"><label class="lb">Note programme (1-5)</label><input id="svP" type="number" min="1" max="5" value="4"></div></div>
+<div class="g2"><div class="fg"><label class="lb">Effort ressenti (1-10)</label><input id="svE" type="number" min="1" max="10" value="7"></div><div class="fg"><label class="lb">Objectifs</label><select id="svGoal"><option>En cours</option><option>Atteints</option><option>Non atteints</option></select></div></div>
+<div class="fg"><label class="lb">Commentaires / ressenti</label><textarea id="svCom" placeholder="Comment vous sentez-vous après cette séance ?"></textarea></div>
+`,onSave:async()=>{
+  await sb.from('surveys').insert({coach_id:mc.coach_id,client_id:mc.id,global_rating:+document.getElementById('svG')?.value,coach_rating:+document.getElementById('svC')?.value,program_rating:+document.getElementById('svP')?.value,effort:+document.getElementById('svE')?.value,comments:document.getElementById('svCom')?.value,goals:document.getElementById('svGoal')?.value});
+  // Notify coach
+  await sb.from('notifications').insert({user_id:mc.coach_id,type:'survey',title:'Nouvel avis client',body:`${mc.first_name} ${mc.last_name} a donné son avis`});
+  S.modal=null;await loadSurveys();toast('Merci pour votre avis !');R();
+}};R();
+}
 
 // ===== CALORIES CALCULATOR (shared) =====
 function calcKcal(){
