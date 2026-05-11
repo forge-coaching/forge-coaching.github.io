@@ -1,7 +1,15 @@
-// ===== FORGE v5 — SUPABASE CONNECTED =====
-const SUPA_URL='https://zvoruwwnpjllejdpkvby.supabase.co';
-const SUPA_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp2b3J1d3ducGpsbGVqZHBrdmJ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3MDEwNTQsImV4cCI6MjA4OTI3NzA1NH0.Yze0pciebPhlrsbBci3eQMIeRpGS_dkYOxVrliiezrQ';
-const sb=supabase.createClient(SUPA_URL,SUPA_KEY);
+// ===== FORGE v6 — APPWRITE BACKEND =====
+const APPWRITE_ENDPOINT='https://fra.cloud.appwrite.io/v1';
+const APPWRITE_PROJECT='6a01b5dc0002471617ca';
+const DB_ID='forge';
+const COL={profiles:'profiles',clients:'clients',programs:'programs',sessions:'sessions',surveys:'surveys',foods:'foods',messages:'messages',performances:'performances',notifications:'notifications'};
+const BUCKET_MEDIA='photos';
+
+const {Client,Account,Databases,Storage,Query,ID,Permission,Role}=Appwrite;
+const aw_client=new Client().setEndpoint(APPWRITE_ENDPOINT).setProject(APPWRITE_PROJECT);
+const aw_account=new Account(aw_client);
+const aw_databases=new Databases(aw_client);
+const aw_storage=new Storage(aw_client);
 
 // ===== STATE =====
 let S={user:null,profile:null,pg:'dashboard',clients:[],programs:[],sessions:[],surveys:[],foods:[],notifs:[],toasts:[],modal:null,chatTarget:null,exFilter:'Tous',loading:true,notifOpen:false,sideOpen:false};
@@ -39,162 +47,193 @@ play:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></sv
 
 // ===== AUTH =====
 async function doSignUp(email,pass,name,role,firstName,lastName,extra){
-  const{data,error}=await sb.auth.signUp({email,password:pass,options:{data:{full_name:name,role}}});
-  if(error){toast(error.message,'err');S.loading=false;R();return;}
-  if(!data.session){
-    const{data:d2,error:e2}=await sb.auth.signInWithPassword({email,password:pass});
-    if(e2){toast('Compte créé ! Connectez-vous.','inf');S.loading=false;R();return;}
-    S.user=d2.user;
-  } else {
-    S.user=data.user;
-  }
-  S.loading=true;showTransLoader();
-  await loadProfile();
-  // Auto-create client record linked to THE coach
-  if(S.profile?.role==='client'){
-    const{data:existing}=await sb.from('clients').select('id').eq('user_id',S.user.id);
-    if(!existing||existing.length===0){
-      const fn=firstName||name?.split(' ')[0]||'Client';
-      const ln=lastName||name?.split(' ').slice(1).join(' ')||'';
-      const{data:coach}=await sb.from('profiles').select('id').eq('role','coach').limit(1).single();
-      if(coach){
-        const colors=['#c8ff00','#3b82f6','#22c55e','#a855f7','#f59e0b','#06b6d4'];
-        await sb.from('clients').insert({
-          coach_id:coach.id,user_id:S.user.id,first_name:fn,last_name:ln,email:S.user.email,
-          age:extra?.age||null,weight:extra?.weight||null,height:extra?.height||null,
-          gender:extra?.gender||'male',goal:extra?.goal||null,level:extra?.level||null,
-          activity:'moderate',color:colors[Math.floor(Math.random()*colors.length)],active:true
-        });
-        await sb.from('notifications').insert({user_id:coach.id,type:'client',title:'Nouveau client',body:`${fn} ${ln} vient de s'inscrire`});
-      }
+  try{
+    const user=await aw_account.create(ID.unique(),email,pass,name);
+    await aw_account.createEmailPasswordSession(email,pass);
+    S.user=await aw_account.get();
+    try{
+      await aw_databases.createDocument(DB_ID,COL.profiles,S.user.$id,{email,full_name:name,role:role||'client'});
+    }catch(e){console.warn('[FORGE] profile insert:',e.message);}
+    S.profile={$id:S.user.$id,email,full_name:name,role:role||'client'};
+    if(S.profile.role==='client'){
+      try{
+        const coachQ=await aw_databases.listDocuments(DB_ID,COL.profiles,[Query.equal('role','coach'),Query.limit(1)]);
+        if(coachQ.documents.length){
+          const coach=coachQ.documents[0];
+          const fn=firstName||name?.split(' ')[0]||'Client';
+          const ln=lastName||name?.split(' ').slice(1).join(' ')||'';
+          const colors=['#c8ff00','#3b82f6','#22c55e','#a855f7','#f59e0b','#06b6d4'];
+          await aw_databases.createDocument(DB_ID,COL.clients,ID.unique(),{
+            coach_id:coach.$id,user_id:S.user.$id,first_name:fn,last_name:ln,email,
+            age:extra?.age??null,weight:extra?.weight??null,height:extra?.height??null,
+            gender:extra?.gender||'male',goal:extra?.goal||null,level:extra?.level||null,
+            activity:'moderate',color:colors[Math.floor(Math.random()*colors.length)],active:true
+          });
+          await aw_databases.createDocument(DB_ID,COL.notifications,ID.unique(),{
+            user_id:coach.$id,type:'client',title:'Nouveau client',body:`${fn} ${ln} vient de s'inscrire`,read:false
+          });
+        }
+      }catch(e){console.warn('[FORGE] client auto-create:',e.message);}
     }
+    showTransLoader();
+    await loadAll();
+    subRealtime();
+    S.loading=false;hideTransLoader();R();
+    toast('Bienvenue !');
+  }catch(e){
+    console.error('[FORGE] signup:',e);
+    toast(e.message||'Erreur inscription','err');
+    S.loading=false;R();
   }
-  await loadClients();await loadSessions();await loadPrograms();await loadSurveys();await loadFoods();await loadNotifs();
-  subRealtime();S.loading=false;hideTransLoader();R();toast('Bienvenue !');
 }
+
 async function doSignIn(email,pass){
-  const{data,error}=await sb.auth.signInWithPassword({email,password:pass});
-  if(error){toast(error.message,'err');S.loading=false;R();return;}
-  S.user=data.user;
-  S.loading=true;showTransLoader();
-  await loadProfile();
-  await loadClients();
-  await loadSessions();
-  await loadPrograms();
-  await loadSurveys();
-  await loadFoods();
-  await loadNotifs();
-  subRealtime();
-  S.loading=false;hideTransLoader();R();
-  toast('Bienvenue !');
+  try{
+    await aw_account.createEmailPasswordSession(email,pass);
+    S.user=await aw_account.get();
+    S.loading=true;showTransLoader();
+    await loadAll();
+    subRealtime();
+    S.loading=false;hideTransLoader();R();
+    toast('Bienvenue !');
+  }catch(e){
+    console.error('[FORGE] signin:',e);
+    toast(e.message||'Email ou mot de passe incorrect','err');
+    S.loading=false;R();
+  }
 }
+
+async function doSignOut(){
+  try{await aw_account.deleteSession('current');}catch(e){}
+  S.user=null;S.profile=null;S.clients=[];S.loading=false;R();showAuth('login');
+}
+
 function showTransLoader(){const el=document.getElementById('transLoader');if(el)el.classList.add('show');}
 function hideTransLoader(){const el=document.getElementById('transLoader');if(el)el.classList.remove('show');}
-async function doSignOut(){await sb.auth.signOut();S.user=null;S.profile=null;S.clients=[];S.loading=false;R();showAuth('login');}
 
 // ===== DATA LOADERS =====
 async function loadProfile(){
-  console.log('[FORGE] Loading profile for:', S.user.id);
-  const{data,error}=await sb.from('profiles').select('*').eq('id',S.user.id).maybeSingle();
-  console.log('[FORGE] Profile query result:', data, error);
-  if(data){S.profile=data;return;}
-  // Profile missing — create it
-  console.log('[FORGE] Profile not found, creating...');
-  const meta=S.user.user_metadata||{};
-  const newP={id:S.user.id,email:S.user.email,full_name:meta.full_name||S.user.email.split('@')[0],role:meta.role||'client'};
-  const{data:created,error:iErr}=await sb.from('profiles').insert(newP).select().maybeSingle();
-  console.log('[FORGE] Profile insert result:', created, iErr);
-  if(iErr){
-    console.error('[FORGE] Profile insert failed, using local fallback');
-    S.profile=newP; // Use local fallback so app doesn't crash
-  } else {
-    S.profile=created;
+  try{
+    S.profile=await aw_databases.getDocument(DB_ID,COL.profiles,S.user.$id);
+  }catch(e){
+    const newP={email:S.user.email,full_name:S.user.name||S.user.email.split('@')[0],role:'client'};
+    try{S.profile=await aw_databases.createDocument(DB_ID,COL.profiles,S.user.$id,newP);}
+    catch(e2){S.profile={$id:S.user.$id,...newP};}
   }
 }
+
 async function loadClients(){
-  if(S.profile?.role==='coach'){
-    const{data}=await sb.from('clients').select('*').eq('coach_id',S.user.id).order('created_at',{ascending:false});
-    S.clients=data||[];
-  } else {
-    // Auto-link: if client has no linked record, find by email and link
-    let{data}=await sb.from('clients').select('*').eq('user_id',S.user.id);
-    if(!data||data.length===0){
-      // Try to find a client record with matching email and link it
-      const{data:byEmail}=await sb.from('clients').select('*').eq('email',S.user.email).is('user_id',null);
-      if(byEmail&&byEmail.length>0){
-        await sb.from('clients').update({user_id:S.user.id}).eq('id',byEmail[0].id);
-        data=byEmail;
-        data[0].user_id=S.user.id;
+  try{
+    let res;
+    if(S.profile?.role==='coach'){
+      res=await aw_databases.listDocuments(DB_ID,COL.clients,[Query.equal('coach_id',S.user.$id),Query.orderDesc('$createdAt'),Query.limit(100)]);
+    }else{
+      res=await aw_databases.listDocuments(DB_ID,COL.clients,[Query.equal('user_id',S.user.$id),Query.limit(5)]);
+      if(!res.documents.length){
+        const byEmail=await aw_databases.listDocuments(DB_ID,COL.clients,[Query.equal('email',S.user.email),Query.isNull('user_id'),Query.limit(1)]);
+        if(byEmail.documents.length){
+          const c=byEmail.documents[0];
+          await aw_databases.updateDocument(DB_ID,COL.clients,c.$id,{user_id:S.user.$id});
+          c.user_id=S.user.$id;res={documents:[c]};
+        }
       }
     }
-    S.clients=data||[];
-  }
+    S.clients=res.documents||[];
+  }catch(e){console.error('[FORGE] loadClients:',e);S.clients=[];}
 }
+
 async function loadSessions(){
-  if(S.profile?.role==='coach'){const{data}=await sb.from('sessions').select('*').eq('coach_id',S.user.id).order('date');S.sessions=data||[];}
-  else if(S.clients[0]){const{data}=await sb.from('sessions').select('*').eq('client_id',S.clients[0].id).order('date');S.sessions=data||[];}
+  try{
+    let res;
+    if(S.profile?.role==='coach')res=await aw_databases.listDocuments(DB_ID,COL.sessions,[Query.equal('coach_id',S.user.$id),Query.orderAsc('date'),Query.limit(200)]);
+    else if(S.clients[0])res=await aw_databases.listDocuments(DB_ID,COL.sessions,[Query.equal('client_id',S.clients[0].$id),Query.orderAsc('date'),Query.limit(200)]);
+    else res={documents:[]};
+    S.sessions=res.documents||[];
+  }catch(e){console.error('[FORGE] loadSessions:',e);S.sessions=[];}
 }
+
 async function loadPrograms(){
-  if(S.profile?.role==='coach'){const{data}=await sb.from('programs').select('*').eq('coach_id',S.user.id);S.programs=data||[];}
-  else if(S.clients[0]){const{data}=await sb.from('programs').select('*').eq('client_id',S.clients[0].id);S.programs=data||[];}
+  try{
+    let res;
+    if(S.profile?.role==='coach')res=await aw_databases.listDocuments(DB_ID,COL.programs,[Query.equal('coach_id',S.user.$id),Query.limit(100)]);
+    else if(S.clients[0])res=await aw_databases.listDocuments(DB_ID,COL.programs,[Query.equal('client_id',S.clients[0].$id),Query.limit(50)]);
+    else res={documents:[]};
+    S.programs=res.documents||[];
+  }catch(e){console.error('[FORGE] loadPrograms:',e);S.programs=[];}
 }
+
 async function loadSurveys(){
-  if(S.profile?.role==='coach'){const{data}=await sb.from('surveys').select('*').eq('coach_id',S.user.id).order('created_at',{ascending:false});S.surveys=data||[];}
-  else if(S.clients[0]){const{data}=await sb.from('surveys').select('*').eq('client_id',S.clients[0].id);S.surveys=data||[];}
+  try{
+    let res;
+    if(S.profile?.role==='coach')res=await aw_databases.listDocuments(DB_ID,COL.surveys,[Query.equal('coach_id',S.user.$id),Query.orderDesc('$createdAt'),Query.limit(100)]);
+    else if(S.clients[0])res=await aw_databases.listDocuments(DB_ID,COL.surveys,[Query.equal('client_id',S.clients[0].$id),Query.limit(50)]);
+    else res={documents:[]};
+    S.surveys=res.documents||[];
+  }catch(e){console.error('[FORGE] loadSurveys:',e);S.surveys=[];}
 }
-async function loadFoods(){const{data}=await sb.from('foods').select('*').order('name');S.foods=data||[];}
+
+async function loadFoods(){
+  try{const res=await aw_databases.listDocuments(DB_ID,COL.foods,[Query.limit(200)]);S.foods=res.documents||[];}
+  catch(e){console.error('[FORGE] loadFoods:',e);S.foods=[];}
+}
+
 async function loadNotifs(){
-  const{data}=await sb.from('notifications').select('*').eq('user_id',S.user.id).order('created_at',{ascending:false});
-  S.notifs=data||[];
+  try{const res=await aw_databases.listDocuments(DB_ID,COL.notifications,[Query.equal('user_id',S.user.$id),Query.orderDesc('$createdAt'),Query.limit(50)]);S.notifs=res.documents||[];}
+  catch(e){console.error('[FORGE] loadNotifs:',e);S.notifs=[];}
 }
-async function loadMsgs(cid){const{data}=await sb.from('messages').select('*').eq('client_id',cid).order('created_at');return data||[];}
-async function loadPerfs(cid){const{data}=await sb.from('performances').select('*').eq('client_id',cid).order('date');return data||[];}
+
+async function loadMsgs(cid){
+  try{const res=await aw_databases.listDocuments(DB_ID,COL.messages,[Query.equal('client_id',cid),Query.orderAsc('$createdAt'),Query.limit(200)]);return res.documents||[];}
+  catch(e){console.error('[FORGE] loadMsgs:',e);return [];}
+}
+
+async function loadPerfs(cid){
+  try{const res=await aw_databases.listDocuments(DB_ID,COL.performances,[Query.equal('client_id',cid),Query.orderAsc('date'),Query.limit(200)]);return res.documents||[];}
+  catch(e){console.error('[FORGE] loadPerfs:',e);return [];}
+}
+
 async function loadAll(){
-  console.log('[FORGE] loadAll starting...');
   S.loading=true;R();
   try{
     await loadProfile();
-    console.log('[FORGE] Profile loaded:', S.profile?.role);
     await loadClients();
-    console.log('[FORGE] Clients loaded:', S.clients.length);
     await loadSessions();
     await loadPrograms();
     await loadSurveys();
     await loadFoods();
     await loadNotifs();
-    console.log('[FORGE] All data loaded');
-  }catch(e){console.error('[FORGE] loadAll error:', e);}
+  }catch(e){console.error('[FORGE] loadAll:',e);}
   S.loading=false;R();
 }
 
 // ===== REALTIME =====
+let _rtUnsub=null;
 function subRealtime(){
-  sb.channel('rt-msgs').on('postgres_changes',{event:'INSERT',schema:'public',table:'messages'},()=>{if(S.pg==='chat'||S.pg==='cl-chat'){const el=document.getElementById('chatMsgs');if(el)refreshChat();}}).subscribe();
-  sb.channel('rt-sess').on('postgres_changes',{event:'*',schema:'public',table:'sessions'},()=>{loadSessions().then(R);}).subscribe();
-  sb.channel('rt-notifs').on('postgres_changes',{event:'INSERT',schema:'public',table:'notifications',filter:`user_id=eq.${S.user.id}`},()=>{loadNotifs().then(R);}).subscribe();
+  if(_rtUnsub){try{_rtUnsub();}catch(e){}}
+  try{
+    _rtUnsub=aw_client.subscribe(
+      [`databases.${DB_ID}.collections.${COL.messages}.documents`,
+       `databases.${DB_ID}.collections.${COL.sessions}.documents`,
+       `databases.${DB_ID}.collections.${COL.notifications}.documents`],
+      (event)=>{
+        const ev=event.events.join(' ');
+        if(ev.includes(COL.messages)){if(S.pg==='chat'||S.pg==='cl-chat')refreshChat();}
+        if(ev.includes(COL.sessions))loadSessions().then(R);
+        if(ev.includes(COL.notifications)){if(event.payload?.user_id===S.user?.$id)loadNotifs().then(R);}
+      }
+    );
+  }catch(e){console.warn('[FORGE] realtime:',e.message);}
 }
 
-// ===== AUTH - ULTRA SIMPLE =====
+// ===== INIT =====
 async function initApp(){
-  const{data:{session}}=await sb.auth.getSession();
-  if(session?.user){
-    S.user=session.user;
-    await loadProfile();
-    await loadClients();
-    await loadSessions();
-    await loadPrograms();
-    await loadSurveys();
-    await loadFoods();
+  try{
+    S.user=await aw_account.get();
+    await loadAll();
     subRealtime();
-  }
-  S.loading=false;
-  R();
+  }catch(e){S.user=null;}
+  S.loading=false;R();
 }
-
-// Listen only for sign out (sign in is handled by doSignIn directly)
-sb.auth.onAuthStateChange((ev)=>{
-  if(ev==='SIGNED_OUT'){S.user=null;S.profile=null;S.clients=[];S.loading=false;R();}
-});
 
 initApp();
 
@@ -217,7 +256,8 @@ function R(){
   if((S.pg==='chat'&&S.chatTarget)||(S.pg==='cl-chat'&&S.clients[0]))setTimeout(refreshChat,50);
 }
 
-// ===== AUTH PAGE (now in HTML, just manage the form) =====
+// ===== AUTH PAGE =====
+let authMode='login',authRole='coach';
 function showAuth(mode){
   authMode=mode;
   const title=document.getElementById('authTitle');
@@ -230,7 +270,7 @@ function showAuth(mode){
     form.innerHTML=`
 <div class="g2"><div class="fg"><label class="lb">Prénom</label><input id="rF" placeholder="Jean"></div><div class="fg"><label class="lb">Nom</label><input id="rL" placeholder="Dupont"></div></div>
 <div class="fg"><label class="lb">Email</label><input id="rE" type="email" placeholder="email@exemple.com"></div>
-<div class="fg"><label class="lb">Mot de passe (min 6)</label><input id="rP" type="password" placeholder="••••••••"></div>
+<div class="fg"><label class="lb">Mot de passe (min 8)</label><input id="rP" type="password" placeholder="••••••••"></div>
 <div class="g3"><div class="fg"><label class="lb">Âge</label><input id="rAge" type="number" placeholder="25"></div><div class="fg"><label class="lb">Poids (kg)</label><input id="rW" type="number" placeholder="75"></div><div class="fg"><label class="lb">Taille (cm)</label><input id="rH" type="number" placeholder="178"></div></div>
 <div class="g2"><div class="fg"><label class="lb">Sexe</label><select id="rGn"><option value="male">Homme</option><option value="female">Femme</option></select></div><div class="fg"><label class="lb">Objectif</label><select id="rGo"><option>Prise de masse</option><option>Perte de poids</option><option>Remise en forme</option><option>Performance</option></select></div></div>
 <div class="fg"><label class="lb">Niveau</label><select id="rLv"><option>Débutant</option><option>Intermédiaire</option><option>Avancé</option></select></div>
@@ -242,21 +282,21 @@ function showAuth(mode){
     form.innerHTML=`<div class="fg"><label class="lb">Email</label><input id="lE" type="email" placeholder="email@exemple.com"></div><div class="fg"><label class="lb">Mot de passe</label><input id="lP" type="password" placeholder="••••••••"></div><button class="b bp" style="width:100%;justify-content:center;padding:12px" onclick="handleLogin()">Se connecter</button><p style="text-align:center;margin-top:16px;font-size:.72rem;color:var(--t4)">Pas de compte ? <a onclick="showAuth('register')">Commencer gratuitement</a></p>`;
   }
 }
-// Init the login form on load
 setTimeout(()=>showAuth('login'),100);
 
-// ===== AUTH PAGE =====
-let authMode='login',authRole='coach';
-// authPg removed - landing page lives in index.html
+async function handleLogin(){
+  const e=document.getElementById('lE')?.value,p=document.getElementById('lP')?.value;
+  if(!e||!p){toast('Champs requis','err');return;}
+  S.loading=true;R();
+  await doSignIn(e,p);
+}
 
-
-async function handleLogin(){const e=document.getElementById('lE')?.value,p=document.getElementById('lP')?.value;if(!e||!p){toast('Champs requis','err');return;}S.loading=true;R();await doSignIn(e,p);}
 async function handleReg(){
-const f=document.getElementById('rF')?.value,l=document.getElementById('rL')?.value,e=document.getElementById('rE')?.value,p=document.getElementById('rP')?.value;
-if(!f||!e||!p){toast('Prénom, email et mot de passe requis','err');return;}
-if(p.length<6){toast('Mot de passe trop court','err');return;}
-const extra={age:+document.getElementById('rAge')?.value||null,weight:+document.getElementById('rW')?.value||null,height:+document.getElementById('rH')?.value||null,gender:document.getElementById('rGn')?.value||'male',goal:document.getElementById('rGo')?.value||'Remise en forme',level:document.getElementById('rLv')?.value||'Débutant'};
-await doSignUp(e,p,f+' '+(l||''),'client',f,l||'',extra);
+  const f=document.getElementById('rF')?.value,l=document.getElementById('rL')?.value,e=document.getElementById('rE')?.value,p=document.getElementById('rP')?.value;
+  if(!f||!e||!p){toast('Prénom, email et mot de passe requis','err');return;}
+  if(p.length<8){toast('Mot de passe min 8 caractères','err');return;}
+  const extra={age:+document.getElementById('rAge')?.value||null,weight:+document.getElementById('rW')?.value||null,height:+document.getElementById('rH')?.value||null,gender:document.getElementById('rGn')?.value||'male',goal:document.getElementById('rGo')?.value||'Remise en forme',level:document.getElementById('rLv')?.value||'Débutant'};
+  await doSignUp(e,p,f+' '+(l||''),'client',f,l||'',extra);
 }
 
 // ===== SIDEBAR =====
@@ -271,6 +311,7 @@ return `<div class="side-overlay ${S.sideOpen?'open':''}" onclick="S.sideOpen=fa
 <div class="nsec" style="margin-top:8px">Compte</div><div class="ni" onclick="S.pg='settings';S.sideOpen=false;R()">${ic.gear}Paramètres</div><div class="ni" onclick="doSignOut()">${ic.out}Déconnexion</div>
 </nav><div class="side-ft"><div class="ucard"><div class="av av-s" style="background:${isC?'var(--ac)':'var(--blu)'};color:#000">${name.split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2)}</div><div style="flex:1;min-width:0"><div style="font-size:.72rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</div><div style="font-size:.55rem;color:var(--t4)">${isC?'Coach':'Client'}</div></div></div></div></div>`;
 }
+
 function topBar(){
 const ts={dashboard:'Tableau de bord',clients:'Clients',exercises:'Bibliothèque',programs:'Programmes',timer:'Timer WOD',performance:'Performances',calories:'Calories',nutrition:'Nutrition',calendar:'Calendrier',chat:'Messages',survey:'Satisfaction',qrcode:'QR Codes',stats:'Stats',settings:'Paramètres','cl-dash':'Mon espace','cl-cal':'Mes séances','cl-prog':'Programme','cl-perf':'Performances','cl-kcal':'Objectifs','cl-nutri':'Nutrition','cl-chat':'Messages','cl-survey':'Évaluations'};
 const unread=S.notifs.filter(n=>!n.read).length;
@@ -278,36 +319,39 @@ return `<div class="topbar"><div style="display:flex;align-items:center;gap:8px"
 <div style="position:relative"><button class="bic" onclick="S.notifOpen=!S.notifOpen;R()">${ic.bell}${unread?`<span style="position:absolute;top:3px;right:3px;width:8px;height:8px;background:var(--red);border-radius:50%;border:2px solid var(--bg)"></span>`:''}</button>
 ${S.notifOpen?`<div style="position:absolute;right:0;top:42px;width:320px;background:var(--bg2);border:1px solid rgba(255,255,255,.06);border-radius:var(--r);box-shadow:0 10px 40px rgba(0,0,0,.4);z-index:200;overflow:hidden">
 <div style="padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.04);display:flex;justify-content:space-between;align-items:center"><strong style="font-size:.82rem">Notifications</strong>${unread?`<button class="b bg bsm" onclick="markAllRead()">Tout lu</button>`:''}</div>
-<div style="max-height:350px;overflow-y:auto">${S.notifs.length?S.notifs.slice(0,10).map(n=>`<div style="padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.03);cursor:pointer;${n.read?'opacity:.5':''}" onclick="handleNotif(${n.id},'${n.type||''}')">
+<div style="max-height:350px;overflow-y:auto">${S.notifs.length?S.notifs.slice(0,10).map(n=>`<div style="padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.03);cursor:pointer;${n.read?'opacity:.5':''}" onclick="handleNotif('${n.$id}','${n.type||''}')">
 <div style="display:flex;justify-content:space-between;align-items:center"><div style="font-size:.78rem;font-weight:${n.read?'400':'700'}">${n.title||''}</div>${!n.read?'<div style="width:6px;height:6px;background:var(--ac);border-radius:50%;flex-shrink:0"></div>':''}</div>
 <div style="font-size:.7rem;color:var(--t3);margin-top:2px">${n.body||''}</div>
-<div style="font-size:.58rem;color:var(--t4);margin-top:3px">${n.created_at?fmtT(n.created_at):''}</div>
+<div style="font-size:.58rem;color:var(--t4);margin-top:3px">${n.$createdAt?fmtT(n.$createdAt):''}</div>
 </div>`).join(''):'<div style="padding:24px;text-align:center;color:var(--t4);font-size:.8rem">Aucune notification</div>'}</div>
 </div>`:''}</div></div>`;
 }
+
 async function markAllRead(){
-  const ids=S.notifs.filter(n=>!n.read).map(n=>n.id);
-  if(ids.length)await sb.from('notifications').update({read:true}).in('id',ids);
+  const toMark=S.notifs.filter(n=>!n.read);
+  for(const n of toMark){
+    try{await aw_databases.updateDocument(DB_ID,COL.notifications,n.$id,{read:true});}catch(e){}
+  }
   S.notifs.forEach(n=>n.read=true);S.notifOpen=false;R();
 }
+
 async function handleNotif(id,type){
-  await sb.from('notifications').update({read:true}).eq('id',id);
-  const n=S.notifs.find(x=>x.id===id);if(n)n.read=true;
+  try{await aw_databases.updateDocument(DB_ID,COL.notifications,id,{read:true});}catch(e){}
+  const n=S.notifs.find(x=>x.$id===id);if(n)n.read=true;
   S.notifOpen=false;
-  if(type==='survey'&&S.profile?.role==='client'){
-    S.pg='cl-survey';R();
-    setTimeout(()=>openClientSurvey(n?.client_id),100);return;
-  }
-  if(type==='survey'){S.pg='survey';}
-  else if(type==='session'){S.pg=S.profile?.role==='coach'?'calendar':'cl-cal';}
-  else if(type==='client'){S.pg='clients';}
+  if(type==='survey'&&S.profile?.role==='client'){S.pg='cl-survey';R();setTimeout(()=>openClientSurvey(n?.client_id),100);return;}
+  if(type==='survey')S.pg='survey';
+  else if(type==='session')S.pg=S.profile?.role==='coach'?'calendar':'cl-cal';
+  else if(type==='client')S.pg='clients';
   R();
 }
 
-// ===== PAGE ROUTER =====
+// ===== ROUTER =====
 function pgRoute(isC){
 const p=S.pg;
-if(p==='exercises')return pgExercises();if(p==='timer')return pgTimer();if(p==='settings')return pgSettings();
+if(p==='exercises')return pgExercises();
+if(p==='timer')return pgTimer();
+if(p==='settings')return pgSettings();
 if(isC){switch(p){case'dashboard':return cDash();case'clients':return cClients();case'programs':return cPrograms();case'performance':return cPerf();case'calories':return cCalories();case'nutrition':return cNutrition();case'calendar':return cCalendar();case'chat':return cChat();case'survey':return cSurvey();case'qrcode':return cQR();case'stats':return cStats();default:return cDash();}}
 else{switch(p){case'cl-dash':return clDash();case'cl-cal':return clCal();case'cl-prog':return clProg();case'cl-perf':return clPerf();case'cl-kcal':return clKcal();case'cl-nutri':return cNutrition();case'cl-chat':return clChat();case'cl-survey':return clSurvey();default:return clDash();}}
 }
@@ -321,26 +365,28 @@ const today=new Date().toISOString().split('T')[0];
 const tse=se.filter(s=>s.date===today);
 return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Tableau de bord</h2><div style="display:flex;gap:6px"><button class="b bp" onclick="openAddSess()">${ic.plus} Séance</button><button class="b bg" onclick="openAddClient()">${ic.plus} Client</button></div></div>
 <div class="pills"><div class="pill"><div class="pill-v" style="color:var(--ac)">${active}</div><div class="pill-l">Clients actifs</div></div><div class="pill"><div class="pill-v" style="color:var(--blu)">${S.programs.length}</div><div class="pill-l">Programmes</div></div><div class="pill"><div class="pill-v" style="color:var(--grn)">${avg}</div><div class="pill-l">Note moy.</div></div><div class="pill"><div class="pill-v" style="color:var(--org)">${se.filter(s=>s.status==='upcoming').length}</div><div class="pill-l">Séances à venir</div></div></div>
-<div class="g2"><div class="card"><div class="card-h"><h3>Séances du jour</h3><span class="badge ba">${today.slice(5)}</span></div><div class="card-b">${tse.length?tse.map(s=>{const c=cl.find(x=>x.id===s.client_id);return `<div class="sess up"><div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center;gap:7px"><div class="av av-s" style="background:${c?.color||'var(--t4)'};color:#000">${c?IN(c.first_name,c.last_name):'?'}</div><strong style="font-size:.82rem">${c?c.first_name+' '+c.last_name:'—'}</strong></div><span style="font-family:var(--fm);font-size:.72rem;color:var(--ac)">${s.time||''}</span></div><div style="margin-top:5px;display:flex;align-items:center;gap:4px;flex-wrap:wrap"><span class="badge bo">${s.type||''}</span>${s.status==='upcoming'?`<button class="b bg bsm" onclick="complSess(${s.id})">Valider ✓</button>`:'<span class="badge bgr">Fait</span>'}<button class="b bs bsm" onclick="editSess(${s.id})">✏️</button><button class="b bd bsm" onclick="delSess(${s.id})">🗑</button></div></div>`;}).join(''):'<div style="text-align:center;padding:16px;color:var(--t4)">Aucune séance aujourd\'hui</div>'}</div></div>
-<div class="card"><div class="card-h"><h3>Clients</h3><button class="b bs bsm" onclick="S.pg='clients';R()">Tous</button></div><div class="card-b">${cl.slice(0,5).map(c=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.03);cursor:pointer" onclick="openClient(${c.id})"><div class="av av-s" style="background:${c.color||'var(--ac)'};color:#000">${IN(c.first_name,c.last_name)}</div><div style="flex:1"><div style="font-size:.78rem;font-weight:600">${c.first_name} ${c.last_name}</div><div style="font-size:.65rem;color:var(--t4)">${c.goal||''}</div></div><span class="badge ${c.active?'bgr':'bo'}" style="font-size:.5rem">${c.active?'Actif':'—'}</span></div>`).join('')}${!cl.length?'<div style="text-align:center;padding:14px;color:var(--t4)"><a onclick="openAddClient()">+ Ajouter un client</a></div>':''}</div></div></div>`;
+<div class="g2"><div class="card"><div class="card-h"><h3>Séances du jour</h3><span class="badge ba">${today.slice(5)}</span></div><div class="card-b">${tse.length?tse.map(s=>{const c=cl.find(x=>x.$id===s.client_id);return `<div class="sess up"><div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center;gap:7px"><div class="av av-s" style="background:${c?.color||'var(--t4)'};color:#000">${c?IN(c.first_name,c.last_name):'?'}</div><strong style="font-size:.82rem">${c?c.first_name+' '+c.last_name:'—'}</strong></div><span style="font-family:var(--fm);font-size:.72rem;color:var(--ac)">${s.time||''}</span></div><div style="margin-top:5px;display:flex;align-items:center;gap:4px;flex-wrap:wrap"><span class="badge bo">${s.type||''}</span>${s.status==='upcoming'?`<button class="b bg bsm" onclick="complSess('${s.$id}')">Valider ✓</button>`:'<span class="badge bgr">Fait</span>'}<button class="b bs bsm" onclick="editSess('${s.$id}')">✏️</button><button class="b bd bsm" onclick="delSess('${s.$id}')">🗑</button></div></div>`;}).join(''):'<div style="text-align:center;padding:16px;color:var(--t4)">Aucune séance aujourd\'hui</div>'}</div></div>
+<div class="card"><div class="card-h"><h3>Clients</h3><button class="b bs bsm" onclick="S.pg='clients';R()">Tous</button></div><div class="card-b">${cl.slice(0,5).map(c=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.03);cursor:pointer" onclick="openClient('${c.$id}')"><div class="av av-s" style="background:${c.color||'var(--ac)'};color:#000">${IN(c.first_name,c.last_name)}</div><div style="flex:1"><div style="font-size:.78rem;font-weight:600">${c.first_name} ${c.last_name}</div><div style="font-size:.65rem;color:var(--t4)">${c.goal||''}</div></div><span class="badge ${c.active?'bgr':'bo'}" style="font-size:.5rem">${c.active?'Actif':'—'}</span></div>`).join('')}${!cl.length?'<div style="text-align:center;padding:14px;color:var(--t4)"><a onclick="openAddClient()">+ Ajouter un client</a></div>':''}</div></div></div>`;
 }
+
 async function complSess(id){
-  const sess=S.sessions.find(s=>s.id===id);
-  await sb.from('sessions').update({status:'done'}).eq('id',id);
+  const sess=S.sessions.find(s=>s.$id===id);
+  try{await aw_databases.updateDocument(DB_ID,COL.sessions,id,{status:'done'});}catch(e){toast(e.message,'err');return;}
   if(sess){
-    const c=S.clients.find(x=>x.id===sess.client_id);
+    const c=S.clients.find(x=>x.$id===sess.client_id);
     if(c&&c.user_id){
-      await sb.from('notifications').insert({user_id:c.user_id,client_id:c.id,type:'survey',title:'Séance terminée !',body:`${sess.type||'Séance'} du ${sess.date} — Donnez votre avis`});
+      try{await aw_databases.createDocument(DB_ID,COL.notifications,ID.unique(),{user_id:c.user_id,client_id:c.$id,type:'survey',title:'Séance terminée !',body:`${sess.type||'Séance'} du ${sess.date} — Donnez votre avis`,read:false});}catch(e){}
     }
   }
-  await loadSessions();toast('Séance validée ! Notification envoyée au client.');R();
+  await loadSessions();toast('Séance validée ! Notification envoyée.');R();
 }
 
 // ===== COACH: CLIENTS =====
 function cClients(){
 return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Clients</h2><button class="b bp" onclick="openAddClient()">${ic.plus} Nouveau</button></div>
-<div class="card"><div style="overflow-x:auto"><table><thead><tr><th>Client</th><th>Objectif</th><th>Niveau</th><th>Poids</th><th>Coaching</th><th>Statut</th></tr></thead><tbody>${S.clients.map(c=>`<tr onclick="openClient(${c.id})"><td><div style="display:flex;align-items:center;gap:7px"><div class="av av-s" style="background:${c.color||'var(--ac)'};color:#000">${IN(c.first_name,c.last_name)}</div><strong>${c.first_name} ${c.last_name}</strong></div></td><td>${c.goal||'—'}</td><td><span class="badge bo">${c.level||'—'}</span></td><td style="font-family:var(--fm)">${c.weight?c.weight+'kg':'—'}</td><td style="font-size:.68rem;color:var(--t3)">${fmtD(c.coach_start)} → ${fmtD(c.coach_end)}</td><td><span class="badge ${c.active?'bgr':'bo'}">${c.active?'Actif':'Inactif'}</span></td></tr>`).join('')}${!S.clients.length?'<tr><td colspan="6" style="text-align:center;color:var(--t4);padding:24px">Aucun client</td></tr>':''}</tbody></table></div></div>`;
+<div class="card"><div style="overflow-x:auto"><table><thead><tr><th>Client</th><th>Objectif</th><th>Niveau</th><th>Poids</th><th>Coaching</th><th>Statut</th></tr></thead><tbody>${S.clients.map(c=>`<tr onclick="openClient('${c.$id}')"><td><div style="display:flex;align-items:center;gap:7px"><div class="av av-s" style="background:${c.color||'var(--ac)'};color:#000">${IN(c.first_name,c.last_name)}</div><strong>${c.first_name} ${c.last_name}</strong></div></td><td>${c.goal||'—'}</td><td><span class="badge bo">${c.level||'—'}</span></td><td style="font-family:var(--fm)">${c.weight?c.weight+'kg':'—'}</td><td style="font-size:.68rem;color:var(--t3)">${fmtD(c.coach_start)} → ${fmtD(c.coach_end)}</td><td><span class="badge ${c.active?'bgr':'bo'}">${c.active?'Actif':'Inactif'}</span></td></tr>`).join('')}${!S.clients.length?'<tr><td colspan="6" style="text-align:center;color:var(--t4);padding:24px">Aucun client</td></tr>':''}</tbody></table></div></div>`;
 }
+
 function openAddClient(){
 S.modal={title:'Nouveau client',w:true,content:`
 <div class="g2"><div class="fg"><label class="lb">Prénom</label><input id="aF"></div><div class="fg"><label class="lb">Nom</label><input id="aL"></div></div>
@@ -355,93 +401,82 @@ S.modal={title:'Nouveau client',w:true,content:`
 const f=document.getElementById('aF')?.value,l=document.getElementById('aL')?.value;
 if(!f||!l){toast('Nom requis','err');return;}
 const cols=['#c8ff00','#3b82f6','#22c55e','#a855f7','#f59e0b','#ef4444','#06b6d4'];
-const{error}=await sb.from('clients').insert({coach_id:S.user.id,first_name:f,last_name:l,email:document.getElementById('aE')?.value,phone:document.getElementById('aPh')?.value,age:+document.getElementById('aA')?.value||null,weight:+document.getElementById('aW')?.value||null,height:+document.getElementById('aH')?.value||null,goal:document.getElementById('aG')?.value,level:document.getElementById('aLv')?.value,gender:document.getElementById('aGn')?.value,activity:document.getElementById('aAc')?.value,coach_start:document.getElementById('aCS')?.value||null,coach_end:document.getElementById('aCE')?.value||null,injuries:document.getElementById('aInj')?.value,medical:document.getElementById('aMed')?.value||'RAS',color:cols[Math.floor(Math.random()*cols.length)]});
-if(error){toast(error.message,'err');return;}
+const data={coach_id:S.user.$id,first_name:f,last_name:l,
+  email:document.getElementById('aE')?.value||null,
+  phone:document.getElementById('aPh')?.value||null,
+  age:+document.getElementById('aA')?.value||null,
+  weight:+document.getElementById('aW')?.value||null,
+  height:+document.getElementById('aH')?.value||null,
+  goal:document.getElementById('aG')?.value,
+  level:document.getElementById('aLv')?.value,
+  gender:document.getElementById('aGn')?.value,
+  activity:document.getElementById('aAc')?.value,
+  coach_start:document.getElementById('aCS')?.value?new Date(document.getElementById('aCS').value).toISOString():null,
+  coach_end:document.getElementById('aCE')?.value?new Date(document.getElementById('aCE').value).toISOString():null,
+  injuries:document.getElementById('aInj')?.value||null,
+  medical:document.getElementById('aMed')?.value||'RAS',
+  color:cols[Math.floor(Math.random()*cols.length)],
+  active:true};
+try{await aw_databases.createDocument(DB_ID,COL.clients,ID.unique(),data);}
+catch(e){toast(e.message,'err');return;}
 S.modal=null;await loadClients();toast('Client ajouté !');R();
 }};R();
 }
+
 function openClient(id){
-const c=S.clients.find(x=>x.id===id);if(!c)return;
+const c=S.clients.find(x=>x.$id===id);if(!c)return;
 S.modal={title:c.first_name+' '+c.last_name,w:true,ns:true,content:`
 <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:18px"><div class="av av-l" style="background:${c.color||'var(--ac)'};color:#000">${IN(c.first_name,c.last_name)}</div><div><div style="font-size:1.05rem;font-weight:700">${c.first_name} ${c.last_name}</div><div style="color:var(--t3);font-size:.8rem">${c.email||''} · ${c.phone||''}</div><div style="display:flex;gap:5px;margin-top:5px"><span class="badge ${c.active?'bgr':'bo'}">${c.active?'Actif':'—'}</span><span class="badge bo">${c.level||''}</span><span class="badge bo">${c.goal||''}</span></div></div></div>
 <div class="g4" style="margin-bottom:14px">${[['weight','kg','Poids'],['height','cm','Taille'],['age','ans','Âge']].map(([k,u,l])=>`<div style="background:var(--bg3);padding:12px;border-radius:var(--r2);text-align:center"><div style="font-family:var(--fs);font-style:italic;font-size:1.4rem">${c[k]||'—'}<span style="font-size:.6rem;color:var(--t4)">${c[k]?u:''}</span></div><div class="lb" style="margin:3px 0 0">${l}</div></div>`).join('')}<div style="background:var(--bg3);padding:12px;border-radius:var(--r2);text-align:center"><div style="font-family:var(--fs);font-style:italic;font-size:1.4rem">${c.gender==='male'?'H':'F'}</div><div class="lb" style="margin:3px 0 0">Genre</div></div></div>
-<div class="g2" style="margin-bottom:12px"><div style="background:var(--bg3);padding:12px;border-radius:var(--r2)"><div class="lb">📅 Coaching</div><div style="font-size:.82rem">${fmtD(c.coach_start)} → ${fmtD(c.coach_end)}</div></div><div style="background:var(--bg3);padding:12px;border-radius:var(--r2)"><div class="lb">💬 Chat</div><div style="font-size:.82rem"><a onclick="S.modal=null;S.chatTarget=${c.id};S.pg='chat';R()">Ouvrir →</a></div></div></div>
-${c.injuries||c.medical&&c.medical!=='RAS'?`<div style="background:rgba(245,158,11,.05);border:1px solid rgba(245,158,11,.12);border-radius:var(--r2);padding:12px;margin-bottom:12px"><div style="font-size:.75rem;font-weight:700;color:var(--org);margin-bottom:4px">⚠️ BLESSURES & MÉDICAL</div>${c.injuries?`<div style="font-size:.8rem;margin-bottom:3px"><strong>Blessures:</strong> ${c.injuries}</div>`:''}${c.medical&&c.medical!=='RAS'?`<div style="font-size:.8rem"><strong>Médical:</strong> ${c.medical}</div>`:''}</div>`:''}
-<div style="margin-bottom:12px"><div class="lb">📸 Photos avant / après</div><div class="ph-grid"><div class="ph-slot">📷 Avant F</div><div class="ph-slot">📷 Avant D</div><div class="ph-slot">📷 Après F</div><div class="ph-slot">📷 Après D</div></div></div>
-<div style="display:flex;gap:6px;margin-top:14px"><button class="b bd bsm" onclick="delClient(${c.id})">${ic.trash} Supprimer</button></div>
+<div class="g2" style="margin-bottom:12px"><div style="background:var(--bg3);padding:12px;border-radius:var(--r2)"><div class="lb">📅 Coaching</div><div style="font-size:.82rem">${fmtD(c.coach_start)} → ${fmtD(c.coach_end)}</div></div><div style="background:var(--bg3);padding:12px;border-radius:var(--r2)"><div class="lb">💬 Chat</div><div style="font-size:.82rem"><a onclick="S.modal=null;S.chatTarget='${c.$id}';S.pg='chat';R()">Ouvrir →</a></div></div></div>
+${(c.injuries||(c.medical&&c.medical!=='RAS'))?`<div style="background:rgba(245,158,11,.05);border:1px solid rgba(245,158,11,.12);border-radius:var(--r2);padding:12px;margin-bottom:12px"><div style="font-size:.75rem;font-weight:700;color:var(--org);margin-bottom:4px">⚠️ BLESSURES & MÉDICAL</div>${c.injuries?`<div style="font-size:.8rem;margin-bottom:3px"><strong>Blessures:</strong> ${c.injuries}</div>`:''}${c.medical&&c.medical!=='RAS'?`<div style="font-size:.8rem"><strong>Médical:</strong> ${c.medical}</div>`:''}</div>`:''}
+<div style="display:flex;gap:6px;margin-top:14px"><button class="b bd bsm" onclick="delClient('${c.$id}')">${ic.trash} Supprimer</button></div>
 `};R();
 }
-async function delClient(id){if(!confirm('Supprimer ce client ?'))return;await sb.from('clients').delete().eq('id',id);S.modal=null;await loadClients();toast('Client supprimé','inf');R();}
+
+async function delClient(id){
+  if(!confirm('Supprimer ce client ?'))return;
+  try{await aw_databases.deleteDocument(DB_ID,COL.clients,id);}catch(e){toast(e.message,'err');return;}
+  S.modal=null;await loadClients();toast('Client supprimé','inf');R();
+}
 
 // ===== CHAT =====
 function cChat(){
-const cl=S.clients,tid=S.chatTarget||cl[0]?.id,tc=cl.find(x=>x.id===tid);
-return `<div class="chat-wrap"><div class="chat-list"><div style="padding:6px 8px;font-size:.55rem;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--t4)">Conversations</div>${cl.map(c=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:var(--r2);cursor:pointer;${c.id===tid?'background:var(--acg);':''}margin-bottom:1px" onclick="S.chatTarget=${c.id};R()"><div class="av av-s" style="background:${c.color||'var(--ac)'};color:#000">${IN(c.first_name,c.last_name)}</div><div style="font-size:.78rem;font-weight:600;${c.id===tid?'color:var(--ac)':''}">${c.first_name}</div></div>`).join('')}</div>
+const cl=S.clients,tid=S.chatTarget||cl[0]?.$id,tc=cl.find(x=>x.$id===tid);
+return `<div class="chat-wrap"><div class="chat-list"><div style="padding:6px 8px;font-size:.55rem;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--t4)">Conversations</div>${cl.map(c=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:var(--r2);cursor:pointer;${c.$id===tid?'background:var(--acg);':''}margin-bottom:1px" onclick="S.chatTarget='${c.$id}';R()"><div class="av av-s" style="background:${c.color||'var(--ac)'};color:#000">${IN(c.first_name,c.last_name)}</div><div style="font-size:.78rem;font-weight:600;${c.$id===tid?'color:var(--ac)':''}">${c.first_name}</div></div>`).join('')}</div>
 <div class="chat-main"><div class="chat-head">${tc?`<div class="av av-s" style="background:${tc.color||'var(--ac)'};color:#000">${IN(tc.first_name,tc.last_name)}</div><strong style="font-size:.85rem">${tc.first_name} ${tc.last_name}</strong>`:''}</div>
 <div class="chat-msgs" id="chatMsgs"><div class="loading" style="min-height:auto;padding:20px">Chargement...</div></div>
-<div class="chat-in"><input placeholder="Écrire..." id="chatInput" onkeydown="if(event.key==='Enter')sendMsg('coach')"><button class="bic" id="voiceBtn" onclick="sendVoice('coach')">${ic.mic}</button><button class="bic" style="background:var(--ac);color:#000" onclick="sendMsg('coach')">${ic.send}</button></div></div></div>`;
+<div class="chat-in"><input placeholder="Écrire..." id="chatInput" onkeydown="if(event.key==='Enter')sendMsg('coach')"><button class="bic" style="background:var(--ac);color:#000" onclick="sendMsg('coach')">${ic.send}</button></div></div></div>`;
 }
+
 function clChat(){
 const mc=S.clients[0];if(!mc)return '<div style="padding:30px;text-align:center;color:var(--t4)">Pas encore lié à un coach.</div>';
 return `<div class="chat-wrap"><div class="chat-main" style="width:100%"><div class="chat-head"><div class="av av-s" style="background:var(--ac);color:#000">C</div><strong style="font-size:.85rem">Mon Coach</strong></div>
 <div class="chat-msgs" id="chatMsgs"><div class="loading" style="min-height:auto;padding:20px">Chargement...</div></div>
-<div class="chat-in"><input placeholder="Écrire..." id="chatInput" onkeydown="if(event.key==='Enter')sendMsg('client')"><button class="bic" id="voiceBtn" onclick="sendVoice('client')">${ic.mic}</button><button class="bic" style="background:var(--ac);color:#000" onclick="sendMsg('client')">${ic.send}</button></div></div></div>`;
+<div class="chat-in"><input placeholder="Écrire..." id="chatInput" onkeydown="if(event.key==='Enter')sendMsg('client')"><button class="bic" style="background:var(--ac);color:#000" onclick="sendMsg('client')">${ic.send}</button></div></div></div>`;
 }
+
 async function refreshChat(){
-const cid=S.profile?.role==='coach'?(S.chatTarget||S.clients[0]?.id):S.clients[0]?.id;
+const cid=S.profile?.role==='coach'?(S.chatTarget||S.clients[0]?.$id):S.clients[0]?.$id;
 if(!cid)return;
 const msgs=await loadMsgs(cid);
 const el=document.getElementById('chatMsgs');if(!el)return;
 const me=S.profile?.role==='coach'?'coach':'client';
-el.innerHTML=msgs.map(m=>`<div class="msg ${m.sender===me?'msg-out':'msg-in'}">${m.is_voice?`<div class="msg-voice" onclick="playVoice(this,'${m.id}')"><span id="vp${m.id}">▶</span><div class="msg-voice-bars">${Array(20).fill(0).map(()=>`<span style="height:${3+Math.random()*14}px"></span>`).join('')}</div><span style="font-size:.6rem;opacity:.5">${m.voice_duration||'0:03'}</span></div>${m.content&&m.content.startsWith('data:audio')?`<audio id="va${m.id}" src="${m.content}" preload="none"></audio>`:''}`:`${m.content}<div class="msg-t">${fmtT(m.created_at)}</div>`}</div>`).join('')||'<div style="text-align:center;padding:30px;color:var(--t4)">Aucun message</div>';
+el.innerHTML=msgs.map(m=>`<div class="msg ${m.sender===me?'msg-out':'msg-in'}">${m.content}<div class="msg-t">${fmtT(m.$createdAt)}</div></div>`).join('')||'<div style="text-align:center;padding:30px;color:var(--t4)">Aucun message</div>';
 el.scrollTop=el.scrollHeight;
 }
-function playVoice(el,id){
-  const audio=document.getElementById('va'+id);
-  const icon=document.getElementById('vp'+id);
-  if(!audio){toast('Audio non disponible','inf');return;}
-  if(audio.paused){audio.play();if(icon)icon.textContent='⏸';audio.onended=()=>{if(icon)icon.textContent='▶'};}
-  else{audio.pause();if(icon)icon.textContent='▶';}
-}
+
 async function sendMsg(sender){
 const input=document.getElementById('chatInput');if(!input||!input.value.trim())return;
-const cid=sender==='coach'?(S.chatTarget||S.clients[0]?.id):S.clients[0]?.id;
-const coachId=sender==='coach'?S.user.id:S.clients[0]?.coach_id;
+const cid=sender==='coach'?(S.chatTarget||S.clients[0]?.$id):S.clients[0]?.$id;
+const coachId=sender==='coach'?S.user.$id:S.clients[0]?.coach_id;
 if(!cid||!coachId)return;
-await sb.from('messages').insert({coach_id:coachId,client_id:cid,sender,content:input.value.trim()});
-input.value='';refreshChat();
-}
-let mediaRec=null,audioChunks=[];
-async function sendVoice(sender){
-const cid=sender==='coach'?(S.chatTarget||S.clients[0]?.id):S.clients[0]?.id;
-const coachId=sender==='coach'?S.user.id:S.clients[0]?.coach_id;
-if(!cid||!coachId)return;
-if(mediaRec&&mediaRec.state==='recording'){mediaRec.stop();return;}
+const content=input.value.trim();
+input.value='';
 try{
-  const stream=await navigator.mediaDevices.getUserMedia({audio:true});
-  audioChunks=[];
-  mediaRec=new MediaRecorder(stream);
-  mediaRec.ondataavailable=e=>{if(e.data.size>0)audioChunks.push(e.data)};
-  mediaRec.onstop=async()=>{
-    stream.getTracks().forEach(t=>t.stop());
-    const blob=new Blob(audioChunks,{type:'audio/webm'});
-    const reader=new FileReader();
-    reader.onloadend=async()=>{
-      const base64=reader.result;
-      const dur=Math.round(audioChunks.length*0.5+1);
-      await sb.from('messages').insert({coach_id:coachId,client_id:cid,sender,is_voice:true,voice_duration:`0:${String(dur).padStart(2,'0')}`,content:base64});
-      toast('Note vocale envoyée !');refreshChat();
-    };
-    reader.readAsDataURL(blob);
-    // Reset button
-    const btn=document.getElementById('voiceBtn');
-    if(btn){btn.innerHTML=ic.mic;btn.style.background='';btn.style.color='';}
-  };
-  mediaRec.start();
-  toast('🎙️ Enregistrement... Cliquez pour arrêter','inf');
-  const btn=document.getElementById('voiceBtn');
-  if(btn){btn.innerHTML='⏹';btn.style.background='var(--red)';btn.style.color='#fff';}
-}catch(e){toast('Micro non disponible','err');}
+  await aw_databases.createDocument(DB_ID,COL.messages,ID.unique(),{coach_id:coachId,client_id:cid,sender,content,is_voice:false});
+}catch(e){toast(e.message,'err');return;}
+refreshChat();
 }
 
 // ===== CALENDAR =====
@@ -455,97 +490,123 @@ while(cells.length%7)cells.push({d:0});
 return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">${mn[m]} ${y}</h2><button class="b bp" onclick="openAddSess()">${ic.plus} Séance</button></div>
 <div class="card" style="margin-bottom:12px"><div class="card-b"><div class="cal">${dn.map(d=>`<div class="cal-hd">${d}</div>`).join('')}${cells.map(c=>!c.d?'<div class="cal-d oth"></div>':`<div class="cal-d ${c.today?'today':''} ${c.ss?.length?'has':''}" onclick="showDaySess('${c.ds}')" style="cursor:pointer">${c.d}</div>`).join('')}</div></div></div>
 <div id="dayDetail"></div>
-<div class="card"><div class="card-h"><h3>Toutes les séances</h3></div><div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Heure</th><th>Client</th><th>Type</th><th>Statut</th><th></th></tr></thead><tbody>${se.map(s=>{const c=cl.find(x=>x.id===s.client_id);return `<tr><td style="font-family:var(--fm)">${s.date}</td><td style="font-family:var(--fm)">${s.time||''}</td><td>${c?c.first_name+' '+c.last_name:'—'}</td><td><span class="badge bo">${s.type||''}</span></td><td>${s.status==='done'?'<span class="badge bgr">Fait</span>':'<span class="badge ba">À venir</span>'}</td><td style="display:flex;gap:4px">${s.status==='upcoming'?`<button class="b bg bsm" onclick="complSess(${s.id})">✓</button>`:''}
-<button class="b bs bsm" onclick="editSess(${s.id})">✏️</button><button class="b bd bsm" onclick="delSess(${s.id})">🗑</button></td></tr>`;}).join('')||'<tr><td colspan="6" style="text-align:center;color:var(--t4);padding:16px">Aucune</td></tr>'}</tbody></table></div></div>`;
+<div class="card"><div class="card-h"><h3>Toutes les séances</h3></div><div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Heure</th><th>Client</th><th>Type</th><th>Statut</th><th></th></tr></thead><tbody>${se.map(s=>{const c=cl.find(x=>x.$id===s.client_id);return `<tr><td style="font-family:var(--fm)">${s.date}</td><td style="font-family:var(--fm)">${s.time||''}</td><td>${c?c.first_name+' '+c.last_name:'—'}</td><td><span class="badge bo">${s.type||''}</span></td><td>${s.status==='done'?'<span class="badge bgr">Fait</span>':'<span class="badge ba">À venir</span>'}</td><td style="display:flex;gap:4px">${s.status==='upcoming'?`<button class="b bg bsm" onclick="complSess('${s.$id}')">✓</button>`:''}
+<button class="b bs bsm" onclick="editSess('${s.$id}')">✏️</button><button class="b bd bsm" onclick="delSess('${s.$id}')">🗑</button></td></tr>`;}).join('')||'<tr><td colspan="6" style="text-align:center;color:var(--t4);padding:16px">Aucune</td></tr>'}</tbody></table></div></div>`;
 }
+
 function showDaySess(ds){
 const se=S.sessions.filter(s=>s.date===ds);const cl=S.clients;
 const el=document.getElementById('dayDetail');if(!el)return;
 if(!se.length){el.innerHTML=`<div class="card"><div class="card-b" style="text-align:center;color:var(--t4);padding:14px">Aucune séance le ${ds}<br><button class="b bg bsm" style="margin-top:8px" onclick="openAddSessDate('${ds}')">+ Ajouter</button></div></div>`;return;}
-el.innerHTML=`<div class="card"><div class="card-h"><h3>📅 ${ds}</h3><button class="b bg bsm" onclick="openAddSessDate('${ds}')">+ Ajouter</button></div><div class="card-b">${se.map(s=>{const c=cl.find(x=>x.id===s.client_id);return `<div class="sess ${s.status==='done'?'dn':'up'}"><div style="display:flex;justify-content:space-between;align-items:center"><div><strong>${s.time||''}</strong> — ${c?c.first_name+' '+c.last_name:'—'} · <span class="badge bo">${s.type||''}</span></div><div style="display:flex;gap:4px">${s.status==='upcoming'?`<button class="b bg bsm" onclick="complSess(${s.id})">✓</button>`:'<span class="badge bgr">Fait</span>'}<button class="b bs bsm" onclick="editSess(${s.id})">✏️</button><button class="b bd bsm" onclick="delSess(${s.id})">🗑</button></div></div></div>`;}).join('')}</div></div>`;
+el.innerHTML=`<div class="card"><div class="card-h"><h3>📅 ${ds}</h3><button class="b bg bsm" onclick="openAddSessDate('${ds}')">+ Ajouter</button></div><div class="card-b">${se.map(s=>{const c=cl.find(x=>x.$id===s.client_id);return `<div class="sess ${s.status==='done'?'dn':'up'}"><div style="display:flex;justify-content:space-between;align-items:center"><div><strong>${s.time||''}</strong> — ${c?c.first_name+' '+c.last_name:'—'} · <span class="badge bo">${s.type||''}</span></div><div style="display:flex;gap:4px">${s.status==='upcoming'?`<button class="b bg bsm" onclick="complSess('${s.$id}')">✓</button>`:'<span class="badge bgr">Fait</span>'}<button class="b bs bsm" onclick="editSess('${s.$id}')">✏️</button><button class="b bd bsm" onclick="delSess('${s.$id}')">🗑</button></div></div></div>`;}).join('')}</div></div>`;
 }
+
 function openAddSessDate(ds){
 const cl=S.clients.filter(c=>c.active);
-S.modal={title:'Séance le '+ds,content:`<div class="fg"><label class="lb">Client</label><select id="sC">${cl.map(c=>`<option value="${c.id}">${c.first_name} ${c.last_name}</option>`).join('')}</select></div><div class="g2"><div class="fg"><label class="lb">Heure</label><input id="sT" value="09:00"></div><div class="fg"><label class="lb">Type</label><input id="sType" placeholder="Push, HIIT..."></div></div>`,
-onSave:async()=>{const cid=+document.getElementById('sC')?.value;const time=document.getElementById('sT')?.value;const type=document.getElementById('sType')?.value||'Séance';
-const{error}=await sb.from('sessions').insert({coach_id:S.user.id,client_id:cid,date:ds,time,type});if(error){toast(error.message,'err');return;}
-const c=S.clients.find(x=>x.id===cid);if(c?.user_id)await sb.from('notifications').insert({user_id:c.user_id,client_id:c.id,type:'session',title:'Nouvelle séance',body:`${type} le ${ds} à ${time}`});
-S.modal=null;await loadSessions();toast('Séance ajoutée !');R();}};R();
-}
-async function editSess(id){
-const s=S.sessions.find(x=>x.id===id);if(!s)return;const cl=S.clients.filter(c=>c.active);
-S.modal={title:'Modifier la séance',content:`<div class="fg"><label class="lb">Client</label><select id="sC">${cl.map(c=>`<option value="${c.id}" ${c.id===s.client_id?'selected':''}>${c.first_name} ${c.last_name}</option>`).join('')}</select></div><div class="g2"><div class="fg"><label class="lb">Date</label><input id="sD" type="date" value="${s.date}"></div><div class="fg"><label class="lb">Heure</label><input id="sT" value="${s.time||'09:00'}"></div></div><div class="g2"><div class="fg"><label class="lb">Type</label><input id="sType" value="${s.type||''}"></div><div class="fg"><label class="lb">Statut</label><select id="sSt"><option value="upcoming" ${s.status==='upcoming'?'selected':''}>À venir</option><option value="done" ${s.status==='done'?'selected':''}>Terminée</option></select></div></div>`,
-onSave:async()=>{await sb.from('sessions').update({client_id:+document.getElementById('sC')?.value,date:document.getElementById('sD')?.value,time:document.getElementById('sT')?.value,type:document.getElementById('sType')?.value,status:document.getElementById('sSt')?.value}).eq('id',id);S.modal=null;await loadSessions();toast('Séance modifiée !');R();}};R();
-}
-async function delSess(id){if(!confirm('Supprimer cette séance ?'))return;await sb.from('sessions').delete().eq('id',id);await loadSessions();toast('Séance supprimée','inf');R();}
-function openAddSess(){
-const cl=S.clients.filter(c=>c.active);
-S.modal={title:'Nouvelle séance',content:`<div class="fg"><label class="lb">Client</label><select id="sC">${cl.map(c=>`<option value="${c.id}">${c.first_name} ${c.last_name}</option>`).join('')}</select></div><div class="g2"><div class="fg"><label class="lb">Date</label><input id="sD" type="date" value="${new Date().toISOString().split('T')[0]}"></div><div class="fg"><label class="lb">Heure</label><input id="sT" value="09:00"></div></div><div class="fg"><label class="lb">Type</label><input id="sType" placeholder="Push, HIIT..."></div>`,
+S.modal={title:'Séance le '+ds,content:`<div class="fg"><label class="lb">Client</label><select id="sC">${cl.map(c=>`<option value="${c.$id}">${c.first_name} ${c.last_name}</option>`).join('')}</select></div><div class="g2"><div class="fg"><label class="lb">Heure</label><input id="sT" value="09:00"></div><div class="fg"><label class="lb">Type</label><input id="sType" placeholder="Push, HIIT..."></div></div>`,
 onSave:async()=>{
-  const cid=+document.getElementById('sC')?.value;
-  const date=document.getElementById('sD')?.value;
-  const time=document.getElementById('sT')?.value;
-  const type=document.getElementById('sType')?.value||'Séance';
-  const{error}=await sb.from('sessions').insert({coach_id:S.user.id,client_id:cid,date,time,type});
-  if(error){toast(error.message,'err');return;}
-  // Notify client
-  const c=S.clients.find(x=>x.id===cid);
-  if(c&&c.user_id){
-    await sb.from('notifications').insert({user_id:c.user_id,client_id:c.id,type:'session',title:'Nouvelle séance planifiée',body:`${type} le ${date} à ${time}`});
-  }
+  const cid=document.getElementById('sC')?.value;const time=document.getElementById('sT')?.value;const type=document.getElementById('sType')?.value||'Séance';
+  try{await aw_databases.createDocument(DB_ID,COL.sessions,ID.unique(),{coach_id:S.user.$id,client_id:cid,date:ds,time,type,status:'upcoming'});}
+  catch(e){toast(e.message,'err');return;}
+  const c=S.clients.find(x=>x.$id===cid);
+  if(c?.user_id){try{await aw_databases.createDocument(DB_ID,COL.notifications,ID.unique(),{user_id:c.user_id,client_id:c.$id,type:'session',title:'Nouvelle séance',body:`${type} le ${ds} à ${time}`,read:false});}catch(e){}}
   S.modal=null;await loadSessions();toast('Séance ajoutée !');R();
 }};R();
 }
 
-// ===== COACH: PROGRAMS (FULL CRUD) =====
+async function editSess(id){
+const s=S.sessions.find(x=>x.$id===id);if(!s)return;const cl=S.clients.filter(c=>c.active);
+S.modal={title:'Modifier la séance',content:`<div class="fg"><label class="lb">Client</label><select id="sC">${cl.map(c=>`<option value="${c.$id}" ${c.$id===s.client_id?'selected':''}>${c.first_name} ${c.last_name}</option>`).join('')}</select></div><div class="g2"><div class="fg"><label class="lb">Date</label><input id="sD" type="date" value="${s.date}"></div><div class="fg"><label class="lb">Heure</label><input id="sT" value="${s.time||'09:00'}"></div></div><div class="g2"><div class="fg"><label class="lb">Type</label><input id="sType" value="${s.type||''}"></div><div class="fg"><label class="lb">Statut</label><select id="sSt"><option value="upcoming" ${s.status==='upcoming'?'selected':''}>À venir</option><option value="done" ${s.status==='done'?'selected':''}>Terminée</option></select></div></div>`,
+onSave:async()=>{
+  try{await aw_databases.updateDocument(DB_ID,COL.sessions,id,{client_id:document.getElementById('sC')?.value,date:document.getElementById('sD')?.value,time:document.getElementById('sT')?.value,type:document.getElementById('sType')?.value,status:document.getElementById('sSt')?.value});}
+  catch(e){toast(e.message,'err');return;}
+  S.modal=null;await loadSessions();toast('Séance modifiée !');R();
+}};R();
+}
+
+async function delSess(id){
+  if(!confirm('Supprimer cette séance ?'))return;
+  try{await aw_databases.deleteDocument(DB_ID,COL.sessions,id);}catch(e){toast(e.message,'err');return;}
+  await loadSessions();toast('Séance supprimée','inf');R();
+}
+
+function openAddSess(){
+const cl=S.clients.filter(c=>c.active);
+S.modal={title:'Nouvelle séance',content:`<div class="fg"><label class="lb">Client</label><select id="sC">${cl.map(c=>`<option value="${c.$id}">${c.first_name} ${c.last_name}</option>`).join('')}</select></div><div class="g2"><div class="fg"><label class="lb">Date</label><input id="sD" type="date" value="${new Date().toISOString().split('T')[0]}"></div><div class="fg"><label class="lb">Heure</label><input id="sT" value="09:00"></div></div><div class="fg"><label class="lb">Type</label><input id="sType" placeholder="Push, HIIT..."></div>`,
+onSave:async()=>{
+  const cid=document.getElementById('sC')?.value;const date=document.getElementById('sD')?.value;const time=document.getElementById('sT')?.value;const type=document.getElementById('sType')?.value||'Séance';
+  try{await aw_databases.createDocument(DB_ID,COL.sessions,ID.unique(),{coach_id:S.user.$id,client_id:cid,date,time,type,status:'upcoming'});}
+  catch(e){toast(e.message,'err');return;}
+  const c=S.clients.find(x=>x.$id===cid);
+  if(c&&c.user_id){try{await aw_databases.createDocument(DB_ID,COL.notifications,ID.unique(),{user_id:c.user_id,client_id:c.$id,type:'session',title:'Nouvelle séance planifiée',body:`${type} le ${date} à ${time}`,read:false});}catch(e){}}
+  S.modal=null;await loadSessions();toast('Séance ajoutée !');R();
+}};R();
+}
+
+// ===== PROGRAMS =====
 function cPrograms(){
 return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Programmes</h2><button class="b bp" onclick="openAddProg()">${ic.plus} Programme</button></div>
-${S.programs.length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">${S.programs.map(p=>{const c=S.clients.find(x=>x.id===p.client_id);return `<div class="card" style="cursor:pointer" onclick="openViewProg(${p.id})"><div style="height:60px;background:linear-gradient(135deg,#1a1a2e,#0f172a);display:flex;align-items:flex-end;padding:10px 14px;position:relative"><div style="position:absolute;inset:0;background:linear-gradient(to top,var(--s),transparent)"></div><h3 style="position:relative;font-family:var(--fs);font-style:italic;font-size:1.1rem">${p.name}</h3></div><div style="padding:12px 14px"><div style="display:flex;gap:4px;margin-bottom:5px"><span class="badge ba">${p.level||''}</span><span class="badge bo">${p.type||''}</span><span class="badge bo">${p.duration||''}</span></div><p style="font-size:.72rem;color:var(--t3)">${p.description||''}</p>${c?`<div style="font-size:.65rem;color:var(--t4);margin-top:4px">→ ${c.first_name} ${c.last_name}</div>`:''}</div></div>`;}).join('')}</div>`:'<div style="color:var(--t4);text-align:center;padding:30px">Aucun programme</div>'}`;
+${S.programs.length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">${S.programs.map(p=>{const c=S.clients.find(x=>x.$id===p.client_id);return `<div class="card" style="cursor:pointer" onclick="openViewProg('${p.$id}')"><div style="height:60px;background:linear-gradient(135deg,#1a1a2e,#0f172a);display:flex;align-items:flex-end;padding:10px 14px;position:relative"><div style="position:absolute;inset:0;background:linear-gradient(to top,var(--s),transparent)"></div><h3 style="position:relative;font-family:var(--fs);font-style:italic;font-size:1.1rem">${p.name}</h3></div><div style="padding:12px 14px"><div style="display:flex;gap:4px;margin-bottom:5px"><span class="badge ba">${p.level||''}</span><span class="badge bo">${p.type||''}</span><span class="badge bo">${p.duration||''}</span></div><p style="font-size:.72rem;color:var(--t3)">${p.description||''}</p>${c?`<div style="font-size:.65rem;color:var(--t4);margin-top:4px">→ ${c.first_name} ${c.last_name}</div>`:''}</div></div>`;}).join('')}</div>`:'<div style="color:var(--t4);text-align:center;padding:30px">Aucun programme</div>'}`;
 }
+
 function openAddProg(){
 const cl=S.clients.filter(c=>c.active);
 S.modal={title:'Nouveau programme',w:true,content:`
 <div class="fg"><label class="lb">Nom</label><input id="pN" placeholder="Push Pull Legs"></div>
 <div class="fg"><label class="lb">Description</label><textarea id="pDesc"></textarea></div>
 <div class="g3"><div class="fg"><label class="lb">Type</label><select id="pT"><option>Musculation</option><option>HIIT</option><option>CrossFit</option><option>Pilates</option><option>Cardio</option></select></div><div class="fg"><label class="lb">Niveau</label><select id="pLv"><option>Débutant</option><option>Intermédiaire</option><option>Avancé</option></select></div><div class="fg"><label class="lb">Durée</label><input id="pDur" placeholder="12 sem"></div></div>
-<div class="g2"><div class="fg"><label class="lb">Jours/sem</label><input id="pDpw" type="number" value="4"></div><div class="fg"><label class="lb">Client</label><select id="pCl"><option value="">Aucun</option>${cl.map(c=>`<option value="${c.id}">${c.first_name} ${c.last_name}</option>`).join('')}</select></div></div>
+<div class="g2"><div class="fg"><label class="lb">Jours/sem</label><input id="pDpw" type="number" value="4"></div><div class="fg"><label class="lb">Client</label><select id="pCl"><option value="">Aucun</option>${cl.map(c=>`<option value="${c.$id}">${c.first_name} ${c.last_name}</option>`).join('')}</select></div></div>
 `,onSave:async()=>{
 const n=document.getElementById('pN')?.value;if(!n){toast('Nom requis','err');return;}
-const{error}=await sb.from('programs').insert({coach_id:S.user.id,name:n,description:document.getElementById('pDesc')?.value,type:document.getElementById('pT')?.value,level:document.getElementById('pLv')?.value,duration:document.getElementById('pDur')?.value,days_per_week:+document.getElementById('pDpw')?.value||4,client_id:+document.getElementById('pCl')?.value||null});
-if(error){toast(error.message,'err');return;}S.modal=null;await loadPrograms();toast('Programme créé !');R();
+const cid=document.getElementById('pCl')?.value||null;
+try{await aw_databases.createDocument(DB_ID,COL.programs,ID.unique(),{coach_id:S.user.$id,name:n,description:document.getElementById('pDesc')?.value||null,type:document.getElementById('pT')?.value,level:document.getElementById('pLv')?.value,duration:document.getElementById('pDur')?.value||null,days_per_week:+document.getElementById('pDpw')?.value||4,client_id:cid});}
+catch(e){toast(e.message,'err');return;}
+S.modal=null;await loadPrograms();toast('Programme créé !');R();
 }};R();
 }
-async function openViewProg(id){
-const p=S.programs.find(x=>x.id===id);if(!p)return;const c=S.clients.find(x=>x.id===p.client_id);
-S.modal={title:p.name,w:true,ns:true,content:`<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:14px"><span class="badge ba">${p.level||''}</span><span class="badge bo">${p.type||''}</span><span class="badge bo">${p.duration||''}</span>${p.days_per_week?`<span class="badge bo">${p.days_per_week}j/sem</span>`:''}</div><p style="color:var(--t2);margin-bottom:14px">${p.description||''}</p>${c?`<div style="background:var(--bg3);padding:10px;border-radius:var(--r2);margin-bottom:14px"><div class="lb">Client assigné</div><strong>${c.first_name} ${c.last_name}</strong></div>`:''}<button class="b bd bsm" onclick="delProg(${p.id})">${ic.trash} Supprimer</button>`};R();
-}
-async function delProg(id){if(!confirm('Supprimer ?'))return;await sb.from('programs').delete().eq('id',id);S.modal=null;await loadPrograms();toast('Supprimé','inf');R();}
 
-// ===== COACH: PERFORMANCES =====
+async function openViewProg(id){
+const p=S.programs.find(x=>x.$id===id);if(!p)return;const c=S.clients.find(x=>x.$id===p.client_id);
+S.modal={title:p.name,w:true,ns:true,content:`<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:14px"><span class="badge ba">${p.level||''}</span><span class="badge bo">${p.type||''}</span><span class="badge bo">${p.duration||''}</span>${p.days_per_week?`<span class="badge bo">${p.days_per_week}j/sem</span>`:''}</div><p style="color:var(--t2);margin-bottom:14px">${p.description||''}</p>${c?`<div style="background:var(--bg3);padding:10px;border-radius:var(--r2);margin-bottom:14px"><div class="lb">Client assigné</div><strong>${c.first_name} ${c.last_name}</strong></div>`:''}<button class="b bd bsm" onclick="delProg('${p.$id}')">${ic.trash} Supprimer</button>`};R();
+}
+
+async function delProg(id){
+  if(!confirm('Supprimer ?'))return;
+  try{await aw_databases.deleteDocument(DB_ID,COL.programs,id);}catch(e){toast(e.message,'err');return;}
+  S.modal=null;await loadPrograms();toast('Supprimé','inf');R();
+}
+
+// ===== PERFORMANCES =====
 function cPerf(){
 const cl=S.clients.filter(c=>c.active);
 return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Performances</h2><button class="b bp" onclick="openAddPerf()">${ic.plus} Entrée</button></div>
-<div class="fg"><label class="lb">Client</label><select id="perfCl" onchange="showPerf()">${cl.map(c=>`<option value="${c.id}">${c.first_name} ${c.last_name}</option>`).join('')}</select></div>
+<div class="fg"><label class="lb">Client</label><select id="perfCl" onchange="showPerf()">${cl.map(c=>`<option value="${c.$id}">${c.first_name} ${c.last_name}</option>`).join('')}</select></div>
 <div id="perfData"></div>`;
 }
+
 async function showPerf(){
-const cid=+document.getElementById('perfCl')?.value;if(!cid)return;
+const cid=document.getElementById('perfCl')?.value;if(!cid)return;
 const data=await loadPerfs(cid);const el=document.getElementById('perfData');if(!el)return;
 if(!data.length){el.innerHTML='<div class="card"><div class="card-b" style="text-align:center;color:var(--t4);padding:24px">Aucune performance</div></div>';return;}
 const exs=[...new Set(data.map(p=>p.exercise))];
 el.innerHTML=exs.map(ex=>{const d=data.filter(p=>p.exercise===ex);const mx=Math.max(...d.map(x=>x.weight||1));return `<div class="card"><div class="card-h"><h3>${ex}</h3><span class="badge ba">${d[d.length-1].weight}kg × ${d[d.length-1].reps}</span></div><div class="card-b"><div class="perf-bars">${d.map((x,i)=>`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;height:100px;justify-content:flex-end"><span style="font-size:.55rem;font-family:var(--fm);color:var(--ac)">${x.weight}kg</span><div style="width:100%;max-width:24px;height:${x.weight/mx*100}%;background:var(--ac);border-radius:3px 3px 0 0;opacity:${.4+i/d.length*.6}"></div><span style="font-size:.5rem;color:var(--t4)">${x.date?.slice(5)||''}</span></div>`).join('')}</div><div style="display:flex;justify-content:space-between;font-size:.7rem;color:var(--t3);margin-top:6px"><span>${d[0].weight}→${d[d.length-1].weight}kg</span><span style="color:var(--grn)">+${(d[d.length-1].weight-d[0].weight).toFixed(1)}kg</span></div></div></div>`;}).join('');
 }
 setTimeout(()=>{if(S.pg==='performance')showPerf()},50);
+
 function openAddPerf(){
 const cl=S.clients.filter(c=>c.active);
 S.modal={title:'Nouvelle performance',content:`
-<div class="fg"><label class="lb">Client</label><select id="prCl">${cl.map(c=>`<option value="${c.id}">${c.first_name} ${c.last_name}</option>`).join('')}</select></div>
+<div class="fg"><label class="lb">Client</label><select id="prCl">${cl.map(c=>`<option value="${c.$id}">${c.first_name} ${c.last_name}</option>`).join('')}</select></div>
 <div class="fg"><label class="lb">Exercice</label><select id="prEx">${EX.filter(e=>e.cat==='Force'||e.cat==='Hypertrophie').map(e=>`<option>${e.n}</option>`).join('')}</select></div>
 <div class="g3"><div class="fg"><label class="lb">Charge (kg)</label><input id="prW" type="number"></div><div class="fg"><label class="lb">Reps</label><input id="prR" type="number"></div><div class="fg"><label class="lb">Date</label><input id="prD" type="date" value="${new Date().toISOString().split('T')[0]}"></div></div>
-`,onSave:async()=>{const{error}=await sb.from('performances').insert({client_id:+document.getElementById('prCl')?.value,exercise:document.getElementById('prEx')?.value,weight:+document.getElementById('prW')?.value||0,reps:+document.getElementById('prR')?.value||0,date:document.getElementById('prD')?.value});if(error){toast(error.message,'err');return;}S.modal=null;toast('Enregistré !');showPerf();R();}};R();
+`,onSave:async()=>{
+  try{await aw_databases.createDocument(DB_ID,COL.performances,ID.unique(),{client_id:document.getElementById('prCl')?.value,exercise:document.getElementById('prEx')?.value,weight:+document.getElementById('prW')?.value||0,reps:+document.getElementById('prR')?.value||0,date:document.getElementById('prD')?.value});}
+  catch(e){toast(e.message,'err');return;}
+  S.modal=null;toast('Enregistré !');showPerf();R();
+}};R();
 }
 
-// ===== DEFAULT FOODS DATABASE =====
+// ===== DEFAULT FOODS =====
 const DEFAULT_FOODS=[
 {name:'Blanc de poulet cru (100g)',calories:120,protein:22.5,carbs:0,fat:2.6},
 {name:'Saumon cru (100g)',calories:208,protein:20,carbs:0,fat:13},
@@ -579,7 +640,6 @@ const DEFAULT_FOODS=[
 {name:'Haricots rouges crus (100g)',calories:333,protein:22,carbs:60,fat:0.8},
 ];
 
-// ===== COACH: NUTRITION =====
 function cNutrition(){
 const allFoods=[...DEFAULT_FOODS,...S.foods];
 return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Nutrition</h2><button class="b bp" onclick="openAddFood()">${ic.plus} Aliment</button></div>
@@ -588,33 +648,44 @@ return `<div style="display:flex;justify-content:space-between;align-items:cente
 }
 function rndrFoods(list){return list.map(f=>`<div class="food-i"><div class="food-n">${f.name}</div><div class="food-m"><span style="color:var(--t2)">${f.calories||0}kcal</span><span style="color:var(--ac)">P:${f.protein||0}g</span><span style="color:var(--org)">G:${f.carbs||0}g</span><span style="color:var(--red)">L:${f.fat||0}g</span></div></div>`).join('')||'<div style="color:var(--t4);text-align:center;padding:14px">Aucun aliment</div>';}
 function filterFood(q){const el=document.getElementById('foodGrid');if(el)el.innerHTML=rndrFoods([...DEFAULT_FOODS,...S.foods].filter(f=>f.name.toLowerCase().includes(q.toLowerCase())));}
-function openAddFood(){S.modal={title:'Ajouter un aliment',content:`<div class="fg"><label class="lb">Nom</label><input id="fN" placeholder="Blanc de poulet (100g)"></div><div class="g4"><div class="fg"><label class="lb">Cal</label><input id="fCal" type="number"></div><div class="fg"><label class="lb">Prot</label><input id="fP" type="number"></div><div class="fg"><label class="lb">Gluc</label><input id="fC" type="number"></div><div class="fg"><label class="lb">Lip</label><input id="fF" type="number"></div></div>`,onSave:async()=>{const n=document.getElementById('fN')?.value;if(!n){toast('Nom requis','err');return;}const{error}=await sb.from('foods').insert({coach_id:S.user.id,name:n,calories:+document.getElementById('fCal')?.value||0,protein:+document.getElementById('fP')?.value||0,carbs:+document.getElementById('fC')?.value||0,fat:+document.getElementById('fF')?.value||0});if(error){toast(error.message,'err');return;}S.modal=null;await loadFoods();toast('Ajouté !');R();}};R();}
 
-// ===== COACH: SATISFACTION =====
+function openAddFood(){
+S.modal={title:'Ajouter un aliment',content:`<div class="fg"><label class="lb">Nom</label><input id="fN" placeholder="Blanc de poulet (100g)"></div><div class="g4"><div class="fg"><label class="lb">Cal</label><input id="fCal" type="number"></div><div class="fg"><label class="lb">Prot</label><input id="fP" type="number"></div><div class="fg"><label class="lb">Gluc</label><input id="fC" type="number"></div><div class="fg"><label class="lb">Lip</label><input id="fF" type="number"></div></div>`,
+onSave:async()=>{
+  const n=document.getElementById('fN')?.value;if(!n){toast('Nom requis','err');return;}
+  try{await aw_databases.createDocument(DB_ID,COL.foods,ID.unique(),{coach_id:S.user.$id,name:n,calories:+document.getElementById('fCal')?.value||0,protein:+document.getElementById('fP')?.value||0,carbs:+document.getElementById('fC')?.value||0,fat:+document.getElementById('fF')?.value||0});}
+  catch(e){toast(e.message,'err');return;}
+  S.modal=null;await loadFoods();toast('Ajouté !');R();
+}};R();
+}
+
+// ===== SURVEYS =====
 function cSurvey(){
 const sv=S.surveys;const avg=sv.length?(sv.reduce((a,s)=>a+(s.global_rating||0),0)/sv.length).toFixed(1):0;
 return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Satisfaction</h2><button class="b bp" onclick="openAddSurvey()">${ic.plus} Questionnaire</button></div>
 <div class="pills"><div class="pill"><div class="pill-v" style="color:var(--ac)">${avg}/5</div><div class="pill-l">Note moy.</div></div><div class="pill"><div class="pill-v" style="color:var(--grn)">${sv.length}</div><div class="pill-l">Réponses</div></div></div>
-<div class="card"><div class="card-b">${sv.map(s=>{const c=S.clients.find(x=>x.id===s.client_id);return `<div style="background:var(--bg3);padding:12px;border-radius:var(--r2);border-left:3px solid ${(s.global_rating||0)>=4?'var(--grn)':'var(--org)'};margin-bottom:6px"><div style="display:flex;justify-content:space-between;margin-bottom:3px"><strong style="font-size:.82rem">${c?c.first_name+' '+c.last_name:'—'}</strong><div style="display:flex;align-items:center;gap:8px"><span style="font-size:.65rem;color:var(--red);font-weight:600">${fmtD(s.date||s.created_at)}</span><span style="color:var(--ac)">${'★'.repeat(s.global_rating||0)}${'☆'.repeat(5-(s.global_rating||0))}</span></div></div><div style="display:flex;gap:4px;margin-top:3px"><span class="badge bo">Effort ${s.effort||'—'}/10</span><span class="badge bo">Coach ${s.coach_rating||'—'}/5</span><span class="badge bo">Prog ${s.program_rating||'—'}/5</span><span class="badge bo">${s.goals||'—'}</span></div>${s.comments?`<p style="font-size:.75rem;color:var(--t2);margin-top:4px">"${s.comments}"</p>`:''}</div>`;}).join('')||'<div style="color:var(--t4);text-align:center;padding:16px">Aucun</div>'}</div></div>`;
+<div class="card"><div class="card-b">${sv.map(s=>{const c=S.clients.find(x=>x.$id===s.client_id);return `<div style="background:var(--bg3);padding:12px;border-radius:var(--r2);border-left:3px solid ${(s.global_rating||0)>=4?'var(--grn)':'var(--org)'};margin-bottom:6px"><div style="display:flex;justify-content:space-between;margin-bottom:3px"><strong style="font-size:.82rem">${c?c.first_name+' '+c.last_name:'—'}</strong><div style="display:flex;align-items:center;gap:8px"><span style="font-size:.65rem;color:var(--red);font-weight:600">${fmtD(s.date||s.$createdAt)}</span><span style="color:var(--ac)">${'★'.repeat(s.global_rating||0)}${'☆'.repeat(5-(s.global_rating||0))}</span></div></div><div style="display:flex;gap:4px;margin-top:3px"><span class="badge bo">Effort ${s.effort||'—'}/10</span><span class="badge bo">Coach ${s.coach_rating||'—'}/5</span><span class="badge bo">Prog ${s.program_rating||'—'}/5</span><span class="badge bo">${s.goals||'—'}</span></div>${s.comments?`<p style="font-size:.75rem;color:var(--t2);margin-top:4px">"${s.comments}"</p>`:''}</div>`;}).join('')||'<div style="color:var(--t4);text-align:center;padding:16px">Aucun</div>'}</div></div>`;
 }
+
 function openAddSurvey(){
 const cl=S.clients.filter(c=>c.active);
 S.modal={title:'Nouveau questionnaire',w:true,content:`
-<div class="fg"><label class="lb">Client</label><select id="svCl">${cl.map(c=>`<option value="${c.id}">${c.first_name} ${c.last_name}</option>`).join('')}</select></div>
+<div class="fg"><label class="lb">Client</label><select id="svCl">${cl.map(c=>`<option value="${c.$id}">${c.first_name} ${c.last_name}</option>`).join('')}</select></div>
 <div class="g3"><div class="fg"><label class="lb">Note globale (1-5)</label><input id="svG" type="number" min="1" max="5" value="5"></div><div class="fg"><label class="lb">Note coach (1-5)</label><input id="svC" type="number" min="1" max="5" value="5"></div><div class="fg"><label class="lb">Note programme (1-5)</label><input id="svP" type="number" min="1" max="5" value="4"></div></div>
 <div class="g2"><div class="fg"><label class="lb">Effort (1-10)</label><input id="svE" type="number" min="1" max="10" value="7"></div><div class="fg"><label class="lb">Objectifs</label><select id="svGoal"><option>Atteints</option><option>En cours</option><option>Non atteints</option></select></div></div>
 <div class="fg"><label class="lb">Commentaires</label><textarea id="svCom"></textarea></div>
-`,onSave:async()=>{const{error}=await sb.from('surveys').insert({coach_id:S.user.id,client_id:+document.getElementById('svCl')?.value,global_rating:+document.getElementById('svG')?.value,coach_rating:+document.getElementById('svC')?.value,program_rating:+document.getElementById('svP')?.value,effort:+document.getElementById('svE')?.value,comments:document.getElementById('svCom')?.value,goals:document.getElementById('svGoal')?.value});if(error){toast(error.message,'err');return;}S.modal=null;await loadSurveys();toast('Enregistré !');R();}};R();
+`,onSave:async()=>{
+  try{await aw_databases.createDocument(DB_ID,COL.surveys,ID.unique(),{coach_id:S.user.$id,client_id:document.getElementById('svCl')?.value,global_rating:+document.getElementById('svG')?.value,coach_rating:+document.getElementById('svC')?.value,program_rating:+document.getElementById('svP')?.value,effort:+document.getElementById('svE')?.value,comments:document.getElementById('svCom')?.value||null,goals:document.getElementById('svGoal')?.value,date:new Date().toISOString().split('T')[0]});}
+  catch(e){toast(e.message,'err');return;}
+  S.modal=null;await loadSurveys();toast('Enregistré !');R();
+}};R();
 }
 
-// ===== COACH: QR CODES (real QR generation) =====
+// ===== QR =====
 function genQR(text,size=120){
-// Simple QR-like matrix generation (deterministic from text)
 const modules=21;let matrix=Array(modules).fill(null).map(()=>Array(modules).fill(false));
-// Finder patterns
 const setFinder=(r,c)=>{for(let i=0;i<7;i++)for(let j=0;j<7;j++){matrix[r+i][c+j]=(i===0||i===6||j===0||j===6||(i>=2&&i<=4&&j>=2&&j<=4));}};
 setFinder(0,0);setFinder(0,14);setFinder(14,0);
-// Data from text hash
 let h=0;for(let i=0;i<text.length;i++)h=((h<<5)-h)+text.charCodeAt(i);h=Math.abs(h);
 for(let y=0;y<modules;y++)for(let x=0;x<modules;x++){
   if((x<8&&y<8)||(x>12&&y<8)||(x<8&&y>12))continue;
@@ -623,36 +694,35 @@ for(let y=0;y<modules;y++)for(let x=0;x<modules;x++){
 }
 const cs=size/modules;
 let svg=`<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"><rect width="${size}" height="${size}" fill="white" rx="4"/>`;
-for(let y=0;y<modules;y++)for(let x=0;x<modules;x++){
-  if(matrix[y][x])svg+=`<rect x="${x*cs}" y="${y*cs}" width="${cs}" height="${cs}" fill="black"/>`;
-}
+for(let y=0;y<modules;y++)for(let x=0;x<modules;x++){if(matrix[y][x])svg+=`<rect x="${x*cs}" y="${y*cs}" width="${cs}" height="${cs}" fill="black"/>`;}
 return svg+'</svg>';
 }
+
 function cQR(){
 const base='https://forge-coaching.github.io';
 return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">QR Codes</h2><p style="color:var(--t3);font-size:.8rem">Partagez le QR code pour que vos clients accèdent à leur espace</p></div>
 <div class="qr-grid">${S.clients.filter(c=>c.active).map(c=>{
-const url=`${base}?client=${c.id}`;
+const url=`${base}?client=${c.$id}`;
 return `<div class="qr-card">
 <div class="av av-m" style="background:${c.color||'var(--ac)'};color:#000;margin:0 auto 8px">${IN(c.first_name,c.last_name)}</div>
 <div style="font-weight:700;font-size:.88rem">${c.first_name} ${c.last_name}</div>
 <div style="font-size:.65rem;color:var(--t3);margin-top:2px">${c.email||''}</div>
-<div style="background:#fff;border-radius:8px;padding:8px;display:inline-block;margin:12px 0">${genQR(c.first_name+c.last_name+c.id)}</div>
+<div style="background:#fff;border-radius:8px;padding:8px;display:inline-block;margin:12px 0">${genQR(c.first_name+c.last_name+c.$id)}</div>
 <div style="display:flex;gap:6px;justify-content:center">
 <button class="b bg bsm" onclick="navigator.clipboard?.writeText('${url}');toast('Lien copié !')">📋 Copier</button>
-<button class="b bs bsm" onclick="printQR(${c.id})">🖨️ Imprimer</button>
+<button class="b bs bsm" onclick="printQR('${c.$id}')">🖨️ Imprimer</button>
 </div></div>`;}).join('')||'<div style="color:var(--t4);text-align:center;padding:30px">Aucun client actif</div>'}</div>`;
 }
+
 function printQR(cid){
-const c=S.clients.find(x=>x.id===cid);if(!c)return;
-const qr=genQR(c.first_name+c.last_name+c.id,200);
+const c=S.clients.find(x=>x.$id===cid);if(!c)return;
+const qr=genQR(c.first_name+c.last_name+c.$id,200);
 const win=window.open('','_blank','width=400,height=500');
 win.document.write('<html><head><title>QR - '+c.first_name+'</title><style>body{font-family:Arial;text-align:center;padding:40px}h1{font-size:28px;margin-bottom:4px}p{color:#666;margin-bottom:20px}.qr{display:inline-block;padding:16px;border:2px solid #000;border-radius:8px}small{color:#999;display:block;margin-top:16px}</style></head><body><h1>FORGE</h1><p>Espace client de <strong>'+c.first_name+' '+c.last_name+'</strong></p><div class="qr">'+qr+'</div><br><small>Scannez ce QR code pour accéder à votre espace coaching</small></body></html>');
-win.document.close();
-setTimeout(()=>win.print(),500);
+win.document.close();setTimeout(()=>win.print(),500);
 }
 
-// ===== COACH: STATS =====
+// ===== STATS =====
 function cStats(){
 const done=S.sessions.filter(s=>s.status==='done').length;const goals={};S.clients.forEach(c=>{if(c.goal)goals[c.goal]=(goals[c.goal]||0)+1});const mg=Math.max(...Object.values(goals),1);
 return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Statistiques</h2></div>
@@ -660,18 +730,20 @@ return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-st
 <div class="g2"><div class="card"><div class="card-h"><h3>Objectifs</h3></div><div class="card-b">${Object.entries(goals).map(([g,n])=>`<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:.75rem;margin-bottom:2px"><span>${g}</span><span style="font-family:var(--fm);color:var(--ac)">${n}</span></div><div class="mbar"><div class="mfill" style="width:${n/mg*100}%;background:var(--ac)"></div></div></div>`).join('')||'—'}</div></div>
 <div class="card"><div class="card-h"><h3>Complétion</h3></div><div class="card-b" style="text-align:center"><div style="font-family:var(--fs);font-style:italic;font-size:2.5rem;color:var(--ac)">${S.sessions.length?Math.round(done/S.sessions.length*100):0}%</div><div class="lb" style="margin-top:3px">séances terminées</div></div></div></div>`;
 }
+
 function cCalories(){
 return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Calculateur calorique</h2><p style="color:var(--t3);font-size:.8rem">Mifflin-St Jeor · Valeurs indicatives</p></div>
 <div class="card"><div class="card-b">
-<div class="fg"><label class="lb">Client</label><select id="calCl" onchange="fillCalForm()"><option value="">Choisir un client...</option>${S.clients.map(c=>`<option value="${c.id}">${c.first_name} ${c.last_name}</option>`).join('')}</select></div>
+<div class="fg"><label class="lb">Client</label><select id="calCl" onchange="fillCalForm()"><option value="">Choisir un client...</option>${S.clients.map(c=>`<option value="${c.$id}">${c.first_name} ${c.last_name}</option>`).join('')}</select></div>
 <div class="g4"><div class="fg"><label class="lb">Âge</label><input id="calAge" type="number" placeholder="25"></div><div class="fg"><label class="lb">Poids (kg)</label><input id="calW" type="number" placeholder="75"></div><div class="fg"><label class="lb">Taille (cm)</label><input id="calH" type="number" placeholder="178"></div><div class="fg"><label class="lb">Sexe</label><select id="calG"><option value="male">Homme</option><option value="female">Femme</option></select></div></div>
 <div class="g2"><div class="fg"><label class="lb">Niveau d'activité</label><select id="calAc"><option value="sedentary">Sédentaire (bureau)</option><option value="light">Peu actif (1-2x/sem)</option><option value="moderate" selected>Modéré (3-5x/sem)</option><option value="active">Actif (6-7x/sem)</option><option value="extreme">Très actif (2x/jour)</option></select></div><div class="fg"><label class="lb">Objectif</label><select id="calGo"><option value="maintain">Maintien</option><option value="muscle">Prise de masse (+350)</option><option value="lose">Perte de poids (-500)</option><option value="tone">Tonification (-200)</option><option value="endurance">Endurance (+200)</option></select></div></div>
 <button class="b bp" onclick="calcKcal()" style="width:100%;justify-content:center">Calculer mes besoins</button>
 </div></div><div id="calResult"></div>`;
 }
+
 function fillCalForm(){
-const id=+document.getElementById('calCl')?.value;if(!id)return;
-const c=S.clients.find(x=>x.id===id);if(!c)return;
+const id=document.getElementById('calCl')?.value;if(!id)return;
+const c=S.clients.find(x=>x.$id===id);if(!c)return;
 if(c.age)document.getElementById('calAge').value=c.age;
 if(c.weight)document.getElementById('calW').value=c.weight;
 if(c.height)document.getElementById('calH').value=c.height;
@@ -682,7 +754,6 @@ else if(c.goal==='Perte de poids')document.getElementById('calGo').value='lose';
 else if(c.goal==='Performance')document.getElementById('calGo').value='endurance';
 }
 
-// Shared calculator for coach + client
 function kcalCalc(isClient){
 return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">${isClient?'Mes objectifs':'Calculateur calorique'}</h2><p style="color:var(--t3);font-size:.8rem">Mifflin-St Jeor · Valeurs indicatives</p></div>
 <div class="card"><div class="card-b">
@@ -693,14 +764,13 @@ return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-st
 }
 function clKcal(){return kcalCalc(true);}
 
-// Client performances page
 function clPerf(){
 const mc=S.clients[0];if(!mc)return '<div style="padding:30px;text-align:center;color:var(--t3)">Pas encore lié à un coach.</div>';
 return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Mes performances</h2></div><div id="clPerfData"><div class="loading" style="min-height:auto;padding:20px">Chargement...</div></div>`;
 }
 async function showClPerf(){
 const mc=S.clients[0];if(!mc)return;
-const data=await loadPerfs(mc.id);
+const data=await loadPerfs(mc.$id);
 const el=document.getElementById('clPerfData');if(!el)return;
 if(!data.length){el.innerHTML='<div class="card"><div class="card-b" style="text-align:center;color:var(--t4);padding:24px">Aucune performance enregistrée par votre coach</div></div>';return;}
 const exs=[...new Set(data.map(p=>p.exercise))];
@@ -717,31 +787,30 @@ ${c.medical&&c.medical!=='RAS'?`<div style="background:rgba(245,158,11,.05);bord
 <div class="pills"><div class="pill"><div class="pill-v" style="color:var(--ac)">${c.weight?c.weight+'kg':'—'}</div><div class="pill-l">Poids</div></div><div class="pill"><div class="pill-v" style="color:var(--grn)">${se.filter(s=>s.status==='done').length}</div><div class="pill-l">Terminées</div></div><div class="pill"><div class="pill-v" style="color:var(--blu)">${se.filter(s=>s.status==='upcoming').length}</div><div class="pill-l">À venir</div></div></div>
 <div class="card"><div class="card-h"><h3>Prochaines séances</h3></div><div class="card-b">${se.filter(s=>s.status==='upcoming').slice(0,3).map(s=>`<div class="sess up"><div style="display:flex;justify-content:space-between"><strong>${s.type||'Séance'}</strong><span style="font-family:var(--fm);font-size:.75rem;color:var(--ac)">${s.date} ${s.time||''}</span></div></div>`).join('')||'<div style="color:var(--t4);text-align:center;padding:12px">Aucune</div>'}</div></div>`;
 }
+
 function clCal(){const se=S.sessions;return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Mes séances</h2></div><div class="g2">${[['Terminées','done','bgr'],['À venir','upcoming','ba']].map(([t,st,bc])=>`<div class="card"><div class="card-h"><h3>${t}</h3><span class="badge ${bc}">${se.filter(s=>s.status===st).length}</span></div><div class="card-b">${se.filter(s=>s.status===st).map(s=>`<div class="sess ${st==='done'?'dn':'up'}"><strong>${s.type||''}</strong> <span style="font-family:var(--fm);font-size:.7rem">${s.date} ${s.time||''}</span></div>`).join('')||'<div style="color:var(--t4);text-align:center;padding:10px">—</div>'}</div></div>`).join('')}</div>`;}
 function clProg(){return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Mon programme</h2></div>${S.programs.length?S.programs.map(p=>`<div class="card"><div class="card-b"><strong>${p.name}</strong><p style="color:var(--t3);font-size:.8rem;margin-top:3px">${p.description||''}</p></div></div>`).join(''):'<div style="color:var(--t4);text-align:center;padding:30px">Aucun programme assigné</div>'}`;}
 function clSurvey(){
 const mc=S.clients[0];
-return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Mes évaluations</h2>${mc?`<button class="b bp" onclick="openClientSurvey(${mc.id})">${ic.plus} Donner mon avis</button>`:''}</div>
-${S.surveys.map(s=>`<div class="card"><div class="card-b"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><span style="color:var(--ac)">${'★'.repeat(s.global_rating||0)}${'☆'.repeat(5-(s.global_rating||0))}</span><span style="font-size:.68rem;color:var(--t4)">${s.date||''}</span></div>
-<div style="display:flex;gap:4px;margin-bottom:4px"><span class="badge bo">Effort ${s.effort||'—'}/10</span><span class="badge bo">Coach ${s.coach_rating||'—'}/5</span><span class="badge bo">Programme ${s.program_rating||'—'}/5</span></div>
-${s.comments?`<p style="font-size:.8rem;color:var(--t2);margin-top:4px">"${s.comments}"</p>`:''}</div></div>`).join('')||'<div style="color:var(--t4);text-align:center;padding:30px">Aucune évaluation. Votre coach vous enverra un questionnaire après chaque séance.</div>'}`;
+return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Mes évaluations</h2>${mc?`<button class="b bp" onclick="openClientSurvey('${mc.$id}')">${ic.plus} Donner mon avis</button>`:''}</div>
+${S.surveys.map(s=>`<div class="card"><div class="card-b"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><span style="color:var(--ac)">${'★'.repeat(s.global_rating||0)}${'☆'.repeat(5-(s.global_rating||0))}</span><span style="font-size:.68rem;color:var(--t4)">${s.date||''}</span></div><div style="display:flex;gap:4px;margin-bottom:4px"><span class="badge bo">Effort ${s.effort||'—'}/10</span><span class="badge bo">Coach ${s.coach_rating||'—'}/5</span><span class="badge bo">Programme ${s.program_rating||'—'}/5</span></div>${s.comments?`<p style="font-size:.8rem;color:var(--t2);margin-top:4px">"${s.comments}"</p>`:''}</div></div>`).join('')||'<div style="color:var(--t4);text-align:center;padding:30px">Aucune évaluation.</div>'}`;
 }
+
 function openClientSurvey(clientId){
 const mc=S.clients[0];if(!mc)return;
 S.modal={title:'Donner mon avis',w:true,content:`
 <div style="background:var(--acg);border:1px solid var(--acb);border-radius:var(--r2);padding:12px;margin-bottom:14px;font-size:.82rem;color:var(--ac)">📋 Comment s'est passée votre dernière séance ?</div>
 <div class="g3"><div class="fg"><label class="lb">Note globale (1-5)</label><input id="svG" type="number" min="1" max="5" value="4"></div><div class="fg"><label class="lb">Note coach (1-5)</label><input id="svC" type="number" min="1" max="5" value="5"></div><div class="fg"><label class="lb">Note programme (1-5)</label><input id="svP" type="number" min="1" max="5" value="4"></div></div>
-<div class="g2"><div class="fg"><label class="lb">Effort ressenti (1-10)</label><input id="svE" type="number" min="1" max="10" value="7"></div><div class="fg"><label class="lb">Objectifs</label><select id="svGoal"><option>En cours</option><option>Atteints</option><option>Non atteints</option></select></div></div>
-<div class="fg"><label class="lb">Commentaires / ressenti</label><textarea id="svCom" placeholder="Comment vous sentez-vous après cette séance ?"></textarea></div>
+<div class="g2"><div class="fg"><label class="lb">Effort (1-10)</label><input id="svE" type="number" min="1" max="10" value="7"></div><div class="fg"><label class="lb">Objectifs</label><select id="svGoal"><option>En cours</option><option>Atteints</option><option>Non atteints</option></select></div></div>
+<div class="fg"><label class="lb">Commentaires / ressenti</label><textarea id="svCom"></textarea></div>
 `,onSave:async()=>{
-  await sb.from('surveys').insert({coach_id:mc.coach_id,client_id:mc.id,global_rating:+document.getElementById('svG')?.value,coach_rating:+document.getElementById('svC')?.value,program_rating:+document.getElementById('svP')?.value,effort:+document.getElementById('svE')?.value,comments:document.getElementById('svCom')?.value,goals:document.getElementById('svGoal')?.value});
-  // Notify coach
-  await sb.from('notifications').insert({user_id:mc.coach_id,type:'survey',title:'Nouvel avis client',body:`${mc.first_name} ${mc.last_name} a donné son avis`});
+  try{await aw_databases.createDocument(DB_ID,COL.surveys,ID.unique(),{coach_id:mc.coach_id,client_id:mc.$id,global_rating:+document.getElementById('svG')?.value,coach_rating:+document.getElementById('svC')?.value,program_rating:+document.getElementById('svP')?.value,effort:+document.getElementById('svE')?.value,comments:document.getElementById('svCom')?.value||null,goals:document.getElementById('svGoal')?.value,date:new Date().toISOString().split('T')[0]});}
+  catch(e){toast(e.message,'err');return;}
+  try{await aw_databases.createDocument(DB_ID,COL.notifications,ID.unique(),{user_id:mc.coach_id,type:'survey',title:'Nouvel avis client',body:`${mc.first_name} ${mc.last_name} a donné son avis`,read:false});}catch(e){}
   S.modal=null;await loadSurveys();toast('Merci pour votre avis !');R();
 }};R();
 }
 
-// ===== CALORIES CALCULATOR (shared) =====
 function calcKcal(){
 const age=+document.getElementById('calAge')?.value||25;
 const w=+document.getElementById('calW')?.value||70;
@@ -795,7 +864,6 @@ const EX=[
 {n:'Curl marteau',m:'Biceps',s:'Avant-bras',cat:'Hypertrophie',type:'Iso',diff:1,eq:'Haltères',url:'https://www.youtube.com/results?search_query=curl+marteau',hl:['biceps']},
 {n:'Face pull',m:'Épaules post.',s:'Trapèzes',cat:'Hypertrophie',type:'Iso',diff:1,eq:'Poulie',url:'https://www.youtube.com/results?search_query=face+pull',hl:['shoulders','back']},
 {n:'Développé incliné',m:'Pectoraux haut',s:'Épaules, Triceps',cat:'Hypertrophie',type:'Poly',diff:2,eq:'Haltères+Banc',url:'https://www.youtube.com/results?search_query=développé+incliné+haltères',hl:['chest','shoulders']},
-// MACHINES
 {n:'Leg extension',m:'Quadriceps',s:'—',cat:'Machines',type:'Iso',diff:1,eq:'Machine',url:'https://www.youtube.com/results?search_query=leg+extension+machine',hl:['quads']},
 {n:'Leg curl',m:'Ischio-jambiers',s:'—',cat:'Machines',type:'Iso',diff:1,eq:'Machine',url:'https://www.youtube.com/results?search_query=leg+curl+machine',hl:['hamstrings']},
 {n:'Presse à cuisses',m:'Quadriceps',s:'Fessiers',cat:'Machines',type:'Poly',diff:2,eq:'Machine',url:'https://www.youtube.com/results?search_query=presse+à+cuisses',hl:['quads','glutes']},
@@ -810,18 +878,15 @@ const EX=[
 {n:'Mollets machine',m:'Mollets',s:'—',cat:'Machines',type:'Iso',diff:1,eq:'Machine',url:'https://www.youtube.com/results?search_query=mollets+machine',hl:['calves']},
 {n:'Crunch machine',m:'Abdominaux',s:'—',cat:'Machines',type:'Iso',diff:1,eq:'Machine',url:'https://www.youtube.com/results?search_query=crunch+machine+abdos',hl:['core']},
 {n:'Smith machine squat',m:'Quadriceps',s:'Fessiers',cat:'Machines',type:'Poly',diff:2,eq:'Smith machine',url:'https://www.youtube.com/results?search_query=smith+machine+squat',hl:['quads','glutes']},
-// CROSSFIT
 {n:'Clean & Jerk',m:'Full body',s:'Épaules, Quadriceps',cat:'CrossFit',type:'Poly',diff:5,eq:'Barre olympique',url:'https://www.youtube.com/results?search_query=clean+and+jerk',hl:['quads','shoulders','back']},
 {n:'Thrusters',m:'Full body',s:'Quadriceps, Épaules',cat:'CrossFit',type:'Poly',diff:3,eq:'Barre',url:'https://www.youtube.com/results?search_query=thruster',hl:['quads','shoulders']},
 {n:'Burpees',m:'Full body',s:'Cardio',cat:'CrossFit',type:'Poly',diff:2,eq:'Aucun',url:'https://www.youtube.com/results?search_query=burpees',hl:['chest','quads','core']},
 {n:'Kettlebell swing',m:'Ch. postérieure',s:'Core',cat:'CrossFit',type:'Poly',diff:2,eq:'Kettlebell',url:'https://www.youtube.com/results?search_query=kettlebell+swing',hl:['hamstrings','glutes','core']},
 {n:'Wall balls',m:'Quadriceps',s:'Épaules',cat:'CrossFit',type:'Poly',diff:2,eq:'Medicine ball',url:'https://www.youtube.com/results?search_query=wall+balls',hl:['quads','shoulders']},
 {n:'Box jumps',m:'Quadriceps',s:'Mollets',cat:'CrossFit',type:'Poly',diff:2,eq:'Box',url:'https://www.youtube.com/results?search_query=box+jump',hl:['quads','calves']},
-// PILATES
 {n:'The Hundred',m:'Abdominaux',s:'—',cat:'Pilates',type:'Iso',diff:2,eq:'Tapis',url:'https://www.youtube.com/results?search_query=hundred+pilates',hl:['core']},
 {n:'Teaser',m:'Core',s:'Quadriceps',cat:'Pilates',type:'Poly',diff:4,eq:'Tapis',url:'https://www.youtube.com/results?search_query=teaser+pilates',hl:['core','quads']},
 {n:'Swimming',m:'Dos',s:'Fessiers',cat:'Pilates',type:'Poly',diff:2,eq:'Tapis',url:'https://www.youtube.com/results?search_query=swimming+pilates',hl:['back','glutes']},
-// CARDIO
 {n:'Rameur',m:'Full body',s:'Dos, Jambes',cat:'Cardio',type:'Poly',diff:2,eq:'Rameur',url:'https://www.youtube.com/results?search_query=rameur+technique',hl:['back','quads']},
 {n:'Mountain climbers',m:'Core',s:'Épaules',cat:'Cardio',type:'Poly',diff:2,eq:'Aucun',url:'https://www.youtube.com/results?search_query=mountain+climbers',hl:['core','shoulders']},
 {n:'Corde à sauter',m:'Mollets',s:'Épaules',cat:'Cardio',type:'Poly',diff:1,eq:'Corde',url:'https://www.youtube.com/results?search_query=corde+à+sauter',hl:['calves','shoulders']},
@@ -880,11 +945,36 @@ function beepS(){try{const a=new(window.AudioContext||window.webkitAudioContext)
 function beepL(){try{const a=new(window.AudioContext||window.webkitAudioContext)(),o=a.createOscillator(),g=a.createGain();o.connect(g);g.connect(a.destination);o.frequency.value=1100;g.gain.value=.4;o.start();o.stop(a.currentTime+.3);}catch(e){}}
 
 // ===== SETTINGS =====
-function pgSettings(){const name=S.profile?.full_name||'';return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Paramètres</h2></div><div class="card" style="max-width:550px"><div class="card-h"><h3>Profil</h3></div><div class="card-b"><div style="display:flex;align-items:center;gap:12px;margin-bottom:16px"><div class="av av-l" style="background:var(--ac);color:#000">${name.split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2)}</div><div><div style="font-size:1rem;font-weight:700">${name}</div><div style="color:var(--t3);font-size:.8rem">${S.user?.email||''}</div><span class="badge bo" style="margin-top:3px">${S.profile?.role||'client'}</span></div></div><div class="fg"><label class="lb">Nom</label><input id="sN" value="${name}"></div><button class="b bp" onclick="updProfile()">Sauvegarder</button></div></div>`;}
-async function updProfile(){const n=document.getElementById('sN')?.value;if(!n)return;await sb.from('profiles').update({full_name:n}).eq('id',S.user.id);S.profile.full_name=n;toast('Mis à jour !');R();}
+function pgSettings(){
+const name=S.profile?.full_name||'';
+const isCoach=S.profile?.role==='coach';
+return `<div style="margin-bottom:16px"><h2 style="font-family:var(--fs);font-style:italic;font-size:1.6rem">Paramètres</h2></div>
+<div class="card" style="max-width:550px"><div class="card-h"><h3>Profil</h3></div><div class="card-b">
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px"><div class="av av-l" style="background:var(--ac);color:#000">${name.split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2)}</div><div><div style="font-size:1rem;font-weight:700">${name}</div><div style="color:var(--t3);font-size:.8rem">${S.user?.email||''}</div><span class="badge bo" style="margin-top:3px">${S.profile?.role||'client'}</span></div></div>
+<div class="fg"><label class="lb">Nom</label><input id="sN" value="${name}"></div>
+<button class="b bp" onclick="updProfile()">Sauvegarder</button>
+${!isCoach?`<div style="margin-top:18px;padding-top:14px;border-top:var(--border)"><p style="font-size:.7rem;color:var(--t4);margin-bottom:6px">Mode admin (temporaire)</p><button class="b bs bsm" onclick="makeMeCoach()">Devenir coach</button></div>`:''}
+</div></div>`;
+}
+
+async function updProfile(){
+  const n=document.getElementById('sN')?.value;if(!n)return;
+  try{await aw_databases.updateDocument(DB_ID,COL.profiles,S.user.$id,{full_name:n});}
+  catch(e){toast(e.message,'err');return;}
+  S.profile.full_name=n;toast('Mis à jour !');R();
+}
+
+async function makeMeCoach(){
+  if(!confirm('Passer en mode coach ? Tu auras accès au dashboard coach.'))return;
+  try{await aw_databases.updateDocument(DB_ID,COL.profiles,S.user.$id,{role:'coach'});}
+  catch(e){toast(e.message,'err');return;}
+  S.profile.role='coach';
+  // Supprimer la fiche client auto-créée si elle existe
+  const mine=S.clients.filter(c=>c.user_id===S.user.$id);
+  for(const c of mine){try{await aw_databases.deleteDocument(DB_ID,COL.clients,c.$id);}catch(e){}}
+  await loadAll();R();toast('Tu es maintenant coach !');
+}
 
 // ===== TOAST & MODAL =====
 function toastH(){return S.toasts.length?`<div class="toasts">${S.toasts.map(t=>`<div class="toast ${t.t}">${t.t==='ok'?'✓':t.t==='err'?'✕':'ℹ'} ${t.m}</div>`).join('')}</div>`:'';}
 function modalH(){const m=S.modal;if(!m)return '';return `<div class="mov" onclick="if(event.target===this){S.modal=null;R()}"><div class="mod ${m.w?'w':''}"><div class="mod-h"><h3>${m.title}</h3><button class="bic" onclick="S.modal=null;R()">${ic.x}</button></div><div class="mod-b">${m.content}</div>${!m.ns?`<div class="mod-f"><button class="b bs" onclick="S.modal=null;R()">Annuler</button><button class="b bp" onclick="S.modal.onSave()">Enregistrer</button></div>`:''}</div></div>`;}
-
-R();
