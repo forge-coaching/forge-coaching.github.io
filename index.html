@@ -18,7 +18,7 @@ tailwind.config={darkMode:'class',theme:{extend:{
   fontFamily:{sans:['Inter','sans-serif'],display:['Playfair Display','serif'],mono:['JetBrains Mono','monospace']},
 }}}
 </script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/appwrite@16.0.0"></script>
 <style>
 /* ===== LOADER ===== */
 #loader{position:fixed;inset:0;background:#050507;z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:24px;transition:opacity .6s,visibility .6s}
@@ -29,7 +29,7 @@ tailwind.config={darkMode:'class',theme:{extend:{
 @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 @keyframes slide{from{transform:translateX(-100%)}to{transform:translateX(350%)}}
 
-/* ===== LANDING PAGE ===== */
+/* ===== LANDING ===== */
 #landing{min-height:100dvh;position:relative;overflow:hidden;display:none;flex-direction:column}
 #landing.show{display:flex}
 .grain{position:fixed;inset:0;opacity:.015;pointer-events:none;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");z-index:1}
@@ -42,11 +42,9 @@ tailwind.config={darkMode:'class',theme:{extend:{
 .fade-in{opacity:0;transform:translateY(16px);animation:fadeUp .7s forwards}
 .fade-in-d1{animation-delay:.1s}.fade-in-d2{animation-delay:.2s}.fade-in-d3{animation-delay:.3s}.fade-in-d4{animation-delay:.4s}.fade-in-d5{animation-delay:.5s}
 
-/* ===== APP (loaded by JS) ===== */
 #app{display:none;min-height:100dvh}
 #app.show{display:flex}
 
-/* ===== Keep the CSS vars + component classes for app.js ===== */
 :root{
   --bg:#050507;--bg2:#0a0a0e;--bg3:#0f0f14;--bg4:#15151c;--bg5:#1c1c26;
   --s:#0c0c12;--s2:#12121a;--s3:#191922;
@@ -96,7 +94,6 @@ table{width:100%;border-collapse:collapse}th{text-align:left;padding:9px 12px;fo
 .sess{background:var(--s);border:var(--border);border-radius:var(--r3);padding:12px 14px;margin-bottom:6px}.sess.up{border-left:3px solid var(--ac)}.sess.dn{border-left:3px solid var(--grn);opacity:.6}
 .chat-wrap{display:flex;height:calc(100dvh - 52px);margin:-20px -22px -40px}.chat-list{width:210px;background:var(--bg2);border-right:var(--border);overflow-y:auto;padding:8px;flex-shrink:0}.chat-main{flex:1;display:flex;flex-direction:column;min-width:0}.chat-head{padding:12px 16px;border-bottom:var(--border);display:flex;align-items:center;gap:10px}.chat-msgs{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:6px}
 .msg{max-width:76%;padding:10px 14px;border-radius:var(--r2);font-size:.8rem;line-height:1.55;word-break:break-word}.msg-out{align-self:flex-end;background:linear-gradient(135deg,var(--ac),#b0e600);color:#000;border-bottom-right-radius:3px;box-shadow:0 2px 12px rgba(200,255,0,.1)}.msg-in{align-self:flex-start;background:var(--s2);border:var(--border);border-bottom-left-radius:3px}.msg-t{font-size:.55rem;opacity:.4;margin-top:3px}
-.msg-voice{display:flex;align-items:center;gap:6px;cursor:pointer}.msg-voice-bars{display:flex;align-items:center;gap:1px;flex:1;height:18px}.msg-voice-bars span{width:2px;border-radius:1px;background:currentColor;opacity:.4}
 .chat-in{padding:10px 14px;border-top:var(--border);display:flex;gap:6px;align-items:center;background:var(--bg2)}.chat-in input{flex:1;border-radius:99px;padding:10px 16px}
 .timer-display{font-family:var(--fm);font-size:4rem;text-align:center;line-height:1;padding:24px 0;letter-spacing:4px;color:var(--ac);text-shadow:0 0 40px rgba(200,255,0,.12)}.timer-display.rest{color:var(--org)}.timer-display.done{color:var(--grn)}
 .timer-modes{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}.tm{padding:14px 8px;border-radius:var(--r);border:var(--border);text-align:center;cursor:pointer;background:var(--s);transition:all .15s}.tm:hover{border-color:rgba(255,255,255,.1)}.tm.on{border-color:var(--acb);background:var(--acg)}.tm-i{font-size:1.4rem;margin-bottom:4px}.tm-n{font-size:.76rem;font-weight:700}.tm-d{font-size:.54rem;color:var(--t4);margin-top:2px}
@@ -108,7 +105,6 @@ table{width:100%;border-collapse:collapse}th{text-align:left;padding:9px 12px;fo
 .search-b{position:relative;margin-bottom:12px}.search-b input{padding-left:36px}.search-b::before{content:'🔍';position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:.72rem;opacity:.3}
 .food-i{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg3);border:1px solid rgba(255,255,255,.03);border-radius:var(--r3);margin-bottom:4px;transition:all .12s}.food-i:hover{background:var(--bg4)}.food-n{flex:1;font-weight:600;font-size:.8rem}.food-m{display:flex;gap:8px;font-size:.68rem;font-family:var(--fm)}
 .qr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}.qr-card{background:var(--s);border:var(--border);border-radius:var(--r);padding:18px;text-align:center;transition:all .2s}.qr-card:hover{border-color:rgba(200,255,0,.08)}
-.ph-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.ph-slot{aspect-ratio:1;background:var(--bg3);border:1px dashed rgba(255,255,255,.06);border-radius:var(--r3);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;font-size:.5rem;color:var(--t4);font-weight:600;text-transform:uppercase;letter-spacing:1px;transition:all .15s}.ph-slot:hover{border-color:rgba(200,255,0,.15);background:var(--acg);border-style:solid}
 .mov{position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;z-index:300;animation:fi .2s;padding:16px}.mod{background:var(--bg2);border:1px solid rgba(255,255,255,.07);border-radius:18px;width:100%;max-width:560px;max-height:85dvh;overflow-y:auto;animation:su .25s;box-shadow:0 20px 60px rgba(0,0,0,.5)}.mod.w{max-width:780px}.mod-h{padding:16px 20px;border-bottom:var(--border);display:flex;align-items:center;justify-content:space-between}.mod-h h3{font-size:.9rem;font-weight:600}.mod-b{padding:20px}.mod-f{padding:12px 20px;border-top:var(--border);display:flex;gap:8px;justify-content:flex-end}
 @keyframes fi{from{opacity:0}to{opacity:1}}@keyframes su{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
 .toasts{position:fixed;top:14px;right:14px;z-index:500;display:flex;flex-direction:column;gap:6px}.toast{background:var(--s2);border:var(--border);border-radius:var(--r2);padding:11px 16px;font-size:.76rem;box-shadow:0 8px 30px rgba(0,0,0,.4);display:flex;align-items:center;gap:7px;animation:sr .25s,fo .25s 2.5s forwards;max-width:300px}.toast.ok{border-left:3px solid var(--grn)}.toast.err{border-left:3px solid var(--red)}.toast.inf{border-left:3px solid var(--ac)}
@@ -125,20 +121,18 @@ table{width:100%;border-collapse:collapse}th{text-align:left;padding:9px 12px;fo
   .g2,.g3,.g4{grid-template-columns:1fr}.pills{grid-template-columns:repeat(2,1fr)}
   .chat-list{display:none}.chat-wrap{margin:-14px -14px -28px;height:calc(100dvh - 52px)}
   .timer-modes{grid-template-columns:repeat(2,1fr)}.timer-display{font-size:3rem}
-  .exg{grid-template-columns:1fr}.qr-grid{grid-template-columns:repeat(2,1fr)}.ph-grid{grid-template-columns:repeat(2,1fr)}
+  .exg{grid-template-columns:1fr}.qr-grid{grid-template-columns:repeat(2,1fr)}
   .mod{max-width:95%;border-radius:14px}table{font-size:.72rem}th,td{padding:8px 7px}
 }@media(max-width:400px){.pills{grid-template-columns:1fr 1fr}.pill-v{font-size:1.4rem}.qr-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 
-<!-- ===== LOADER ===== -->
 <div id="loader">
   <div class="logo-anim">Forge</div>
   <div class="bar"></div>
 </div>
 
-<!-- ===== LANDING PAGE (pure HTML, not JS-generated) ===== -->
 <div id="landing">
   <div class="grain"></div>
   <div class="orb orb-1"></div>
@@ -146,7 +140,6 @@ table{width:100%;border-collapse:collapse}th{text-align:left;padding:9px 12px;fo
   <div class="orb orb-3"></div>
   <div class="line-v"></div>
 
-  <!-- Nav -->
   <nav class="relative z-10 flex items-center justify-between px-6 md:px-10 py-5 fade-in">
     <div class="flex items-baseline gap-2">
       <span class="font-display text-2xl font-bold text-[#c8ff00]">Forge</span>
@@ -158,10 +151,8 @@ table{width:100%;border-collapse:collapse}th{text-align:left;padding:9px 12px;fo
     </div>
   </nav>
 
-  <!-- Hero -->
   <div class="relative z-10 flex-1 flex items-center justify-center px-6 md:px-10 py-8">
     <div class="grid md:grid-cols-[1fr_380px] gap-12 md:gap-16 max-w-[880px] w-full items-center">
-      <!-- Left -->
       <div class="text-center md:text-left">
         <div class="fade-in fade-in-d1 inline-flex items-center gap-2 px-3 py-1.5 bg-[rgba(200,255,0,.05)] border border-[rgba(200,255,0,.08)] rounded-full mb-6">
           <div class="w-1.5 h-1.5 rounded-full bg-[#c8ff00] animate-pulse"></div>
@@ -173,25 +164,8 @@ table{width:100%;border-collapse:collapse}th{text-align:left;padding:9px 12px;fo
         <p class="fade-in fade-in-d3 text-sm md:text-[.9rem] text-zinc-500 mt-5 leading-relaxed max-w-sm mx-auto md:mx-0">
           Centralisez vos clients, séances, programmes et performances. Chat temps réel, notifications, suivi nutrition.
         </p>
-        <div class="fade-in fade-in-d4 flex flex-wrap gap-2 mt-7 justify-center md:justify-start">
-          <span class="px-3 py-1.5 text-[11px] text-zinc-500 border border-white/[.05] rounded-full bg-white/[.01]">Séances</span>
-          <span class="px-3 py-1.5 text-[11px] text-zinc-500 border border-white/[.05] rounded-full bg-white/[.01]">Chat</span>
-          <span class="px-3 py-1.5 text-[11px] text-zinc-500 border border-white/[.05] rounded-full bg-white/[.01]">Programmes</span>
-          <span class="px-3 py-1.5 text-[11px] text-zinc-500 border border-white/[.05] rounded-full bg-white/[.01]">Timer WOD</span>
-          <span class="px-3 py-1.5 text-[11px] text-zinc-500 border border-white/[.05] rounded-full bg-white/[.01]">Nutrition</span>
-          <span class="px-3 py-1.5 text-[11px] text-zinc-500 border border-white/[.05] rounded-full bg-white/[.01]">Performances</span>
-        </div>
-        <div class="fade-in fade-in-d5 flex items-center gap-3 mt-8 justify-center md:justify-start">
-          <div class="flex -space-x-2">
-            <div class="w-7 h-7 rounded-full bg-surface-2 border-2 border-bg flex items-center justify-center text-[9px] text-zinc-500">J</div>
-            <div class="w-7 h-7 rounded-full bg-surface-2 border-2 border-bg flex items-center justify-center text-[9px] text-zinc-500">L</div>
-            <div class="w-7 h-7 rounded-full bg-surface-2 border-2 border-bg flex items-center justify-center text-[9px] text-zinc-500">+</div>
-          </div>
-          <span class="text-[11px] text-zinc-600">Utilisé par des coachs</span>
-        </div>
       </div>
 
-      <!-- Right: Auth form -->
       <div id="authCard" class="fade-in fade-in-d3 bg-[#0a0a0e] border border-white/[.06] rounded-2xl p-7 shadow-[0_20px_60px_rgba(0,0,0,.4)]">
         <h2 class="font-display text-xl font-bold mb-1" id="authTitle">Connexion</h2>
         <p class="text-xs text-zinc-500 mb-5" id="authSub">Accédez à votre espace</p>
@@ -200,11 +174,9 @@ table{width:100%;border-collapse:collapse}th{text-align:left;padding:9px 12px;fo
     </div>
   </div>
 
-  <!-- Footer -->
   <div class="relative z-10 text-center py-4 text-[10px] text-zinc-600 tracking-[2px] uppercase">Forge · Coaching Platform</div>
 </div>
 
-<!-- ===== APP (managed by JS) ===== -->
 <div id="app"></div>
 
 <script src="app.js"></script>
